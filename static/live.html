@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Barbershop Voice Assistant</title>
+<style>
+  :root { --bg:#f6f6f4; --card:#fff; --ink:#1c1c1a; --mute:#6b6b66; --line:#e2e2dd; --accent:#1f6f50; --bad:#b3261e; --me:#e8f1ec; --warn:#8a5a00; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#161615; --card:#1f1f1d; --ink:#ecece8; --mute:#9a9a94; --line:#33332f; --accent:#4cc38a; --bad:#ff8a80; --me:#233229; --warn:#e0b050; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.45 system-ui, sans-serif; }
+  main { max-width:720px; margin:0 auto; padding:20px 16px 48px; }
+  h1 { font-size:20px; margin:0 0 4px; } .sub { color:var(--mute); font-size:14px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin-top:16px; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  button { font:inherit; cursor:pointer; border:1px solid var(--line); background:var(--card); color:var(--ink); border-radius:8px; padding:8px 14px; }
+  button.on { background:var(--accent); color:#fff; border-color:var(--accent); }
+  #call { background:var(--accent); color:#fff; border-color:var(--accent); font-size:18px; padding:12px 28px; border-radius:999px; }
+  #call.live { background:var(--bad); border-color:var(--bad); }
+  .meter { height:8px; background:var(--line); border-radius:4px; overflow:hidden; margin-top:14px; }
+  #level { height:100%; width:0; background:var(--accent); transition:width .08s; }
+  #state { margin-top:10px; font-size:14px; color:var(--mute); min-height:20px; }
+  #state b { color:var(--ink); }
+  #log { max-height:360px; overflow:auto; display:flex; flex-direction:column; gap:8px; }
+  .msg { padding:8px 12px; border-radius:10px; max-width:88%; border:1px solid var(--line); }
+  .msg.me { align-self:flex-end; background:var(--me); } .msg.ai { align-self:flex-start; } .msg.cut { opacity:.6; }
+  .tool { align-self:center; font-size:12px; color:var(--mute); }
+  .tip { font-size:13px; color:var(--warn); margin-top:10px; }
+  .ok { color:var(--accent); font-weight:600; }
+  table { width:100%; border-collapse:collapse; font-size:14px; } td { padding:4px 6px; border-bottom:1px solid var(--line); }
+  input[type=text] { flex:1; min-width:180px; font:inherit; padding:8px 10px; border-radius:8px; border:1px solid var(--line); background:var(--card); color:var(--ink); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Barbershop voice assistant <span style="font-weight:400;color:var(--mute)">(live, prototype)</span></h1>
+  <div class="sub">A real-time call: just talk, and <b>interrupt it whenever you like</b>. Sample shop data. Use fake names and numbers.</div>
+
+  <div class="card">
+    <div class="row">
+      <button id="call">Call</button>
+      <button id="mute" disabled>Mute mic</button>
+      <span style="flex:1"></span>
+      <span class="sub">Call language (stays fixed):</span>
+      <button class="lang" data-l="ka">ქართ</button><button class="lang" data-l="en">EN</button><button class="lang" data-l="ru">RU</button>
+    </div>
+    <div class="meter"><div id="level"></div></div>
+    <div id="state"></div>
+    <div class="row sub" id="dbg" style="margin-top:10px">
+      <label><input type="checkbox" id="raw"> raw mic (no echo/noise/gain processing)</label>
+      <label><input type="checkbox" id="save"> save my voice on this computer for debugging</label>
+    </div>
+    <div class="tip">Headphones work best. Without them, the assistant's own voice can leak into the microphone and make it interrupt itself.</div>
+  </div>
+
+  <div class="card"><div id="log"></div></div>
+
+  <div class="card">
+    <b>Bookings made</b> <span class="sub">(from the server's records, not from what the AI says)</span>
+    <table id="books"></table>
+  </div>
+
+  <div class="card" id="devcard">
+    <div class="sub">Dev: type instead of speaking (to test without a microphone)</div>
+    <div class="row" style="margin-top:8px"><input id="typed" type="text" placeholder="type and press Enter while on a call"><button id="send">Send</button></div>
+  </div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+let ws = null, stream = null, micCtx = null, outCtx = null, node = null;
+let nextT = 0, sources = [], lang = 'ka', muted = false, hangingUp = false;
+let userEl = null, aiEl = null, aiText = '', better = { text: '', t: 0 };
+
+function state(html) { $('state').innerHTML = html; }
+function add(cls, text) { const d = document.createElement('div'); d.className = 'msg ' + cls; d.textContent = text; $('log').appendChild(d); $('log').scrollTop = 1e9; return d; }
+function setLang(l) { lang = l; document.querySelectorAll('button.lang').forEach(b => b.classList.toggle('on', b.dataset.l === l)); }
+document.querySelectorAll('button.lang').forEach(b => b.onclick = () => setLang(b.dataset.l)); setLang('ka');
+
+// ---- microphone: 16 kHz mono PCM in ~40 ms pieces, via an AudioWorklet
+const WORKLET = `
+class Pcm extends AudioWorkletProcessor {
+  constructor() { super(); this.buf = new Float32Array(640); this.n = 0; }
+  process(inputs) {
+    const ch = inputs[0][0]; if (!ch) return true;
+    for (let i = 0; i < ch.length; i++) {
+      this.buf[this.n++] = ch[i];
+      if (this.n === 640) {
+        const out = new Int16Array(640); let sum = 0;
+        for (let j = 0; j < 640; j++) { const v = Math.max(-1, Math.min(1, this.buf[j])); out[j] = v * 32767; sum += v * v; }
+        this.port.postMessage({ pcm: out.buffer, rms: Math.sqrt(sum / 640) }, [out.buffer]); this.n = 0;
+      }
+    }
+    return true;
+  }
+}
+registerProcessor('pcm', Pcm);`;
+
+async function openAudio() {
+  outCtx = new AudioContext({ sampleRate: 24000 }); await outCtx.resume();
+  stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: !$('raw').checked, noiseSuppression: !$('raw').checked, autoGainControl: !$('raw').checked, channelCount: 1 } });
+  micCtx = new AudioContext({ sampleRate: 16000 }); await micCtx.resume();
+  await micCtx.audioWorklet.addModule(URL.createObjectURL(new Blob([WORKLET], { type: 'application/javascript' })));
+  const src = micCtx.createMediaStreamSource(stream);
+  node = new AudioWorkletNode(micCtx, 'pcm');
+  node.port.onmessage = e => {
+    $('level').style.width = Math.min(100, e.data.rms * 500) + '%';
+    if (ws && ws.readyState === 1 && !muted) ws.send(e.data.pcm);
+  };
+  src.connect(node);
+}
+function closeAudio() {
+  try { node && node.disconnect(); } catch (e) {}
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  if (micCtx) micCtx.close(); if (outCtx) outCtx.close();
+  stream = micCtx = outCtx = node = null; $('level').style.width = '0';
+}
+
+// ---- playback: queue small buffers back to back; flush instantly when interrupted
+function playChunk(arrayBuf) {
+  if (!outCtx) return;
+  const i16 = new Int16Array(arrayBuf), f = new Float32Array(i16.length);
+  for (let i = 0; i < i16.length; i++) f[i] = i16[i] / 32768;
+  const b = outCtx.createBuffer(1, f.length, 24000); b.copyToChannel(f, 0);
+  const s = outCtx.createBufferSource(); s.buffer = b; s.connect(outCtx.destination);
+  const at = Math.max(outCtx.currentTime + 0.03, nextT); s.start(at); nextT = at + b.duration;
+  sources.push(s); s.onended = () => { sources = sources.filter(x => x !== s); if (!sources.length && hangingUp) finish(); };
+}
+function flushPlayback() { sources.forEach(s => { try { s.stop(); } catch (e) {} }); sources = []; nextT = 0; }
+
+// ---- call
+async function start() {
+  $('call').disabled = true; state('Connecting…'); $('log').innerHTML = ''; hangingUp = false; userEl = aiEl = null; aiText = '';
+  try { await openAudio(); } catch (e) { state('<span style="color:var(--bad)">Microphone problem: ' + (e.message || e.name) + '. Click the lock icon in the address bar and allow the microphone.</span>'); closeAudio(); $('call').disabled = false; return; }
+  ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/call?lang=' + lang + ($('save').checked ? '&save_audio=1' : ''));
+  ws.binaryType = 'arraybuffer';
+  ws.onmessage = ev => { if (typeof ev.data !== 'string') { playChunk(ev.data); return; } onEvent(JSON.parse(ev.data)); };
+  ws.onclose = () => { if ($('call').classList.contains('live') || ws) { if (!sources.length) finish(); else hangingUp = true; } };
+  $('call').disabled = false;
+}
+function onEvent(e) {
+  if (e.type === 'ready') { $('call').textContent = 'Hang up'; $('call').classList.add('live'); $('mute').disabled = false; state('<b>Connected</b> · voice ' + e.voice + ' · talk any time'); }
+  else if (e.type === 'user') { if (!userEl || userEl.dataset.done) { userEl = add('me', ''); aiEl = null; aiText = ''; } if (e.unclear) { userEl.title = 'live model transcript: ' + e.text; const fresh = better.text && (performance.now() - better.t) < 9000; userEl.textContent = fresh ? better.text : '(transcript unclear)'; userEl.dataset.unclear = fresh ? '' : '1'; userEl.classList.add('cut'); } else { userEl.classList.remove('cut'); userEl.textContent = e.text; } state('<b>Listening…</b>'); }
+  else if (e.type === 'heard2') { better = { text: e.text, t: performance.now() }; const last = [...document.querySelectorAll('.msg.me')].pop(); if (last && last.dataset.unclear === '1') { last.textContent = e.text; last.dataset.unclear = ''; } }
+  else if (e.type === 'ai') { if (userEl) userEl.dataset.done = '1'; if (!aiEl) aiEl = add('ai', ''); aiEl.textContent = e.text; state('<b>Assistant is talking</b> — you can interrupt'); }
+  else if (e.type === 'interrupted') { flushPlayback(); if (aiEl) aiEl.classList.add('cut'); aiEl = null; state('<b>Interrupted</b> — go ahead'); }
+  else if (e.type === 'turn_end') { aiEl = null; userEl = null; state('<b>Listening…</b>' + (e.latency_ms ? ' <span class="sub">(replied in ' + (e.latency_ms / 1000).toFixed(1) + ' s)</span>' : '')); }
+  else if (e.type === 'tool') { const t = document.createElement('div'); t.className = 'tool'; t.textContent = '· ' + ({ check_availability: 'checking the calendar', book: 'preparing booking', confirm_booking: 'confirming booking', cancel_pending: 'cancelling', request_callback: 'saving callback', end_call: 'ending call' }[e.name] || e.name) + ' ·'; $('log').appendChild(t); $('log').scrollTop = 1e9; }
+  else if (e.type === 'booked') { const t = document.createElement('div'); t.className = 'tool ok'; t.textContent = '✔ Booked: ' + e.service + ' · ' + e.start + ' · ' + e.name; $('log').appendChild(t); loadBooks(); }
+  else if (e.type === 'hangup') { hangingUp = true; if (!sources.length) finish(); }
+  else if (e.type === 'error') { state('<span style="color:var(--bad)">' + e.text + '</span>'); }
+}
+function finish() {
+  if (ws) { try { ws.close(); } catch (e) {} ws = null; }
+  flushPlayback(); closeAudio(); hangingUp = false;
+  $('call').textContent = 'Call'; $('call').classList.remove('live'); $('mute').disabled = true; $('call').disabled = false;
+  if (!$('state').textContent.startsWith('Maximum') && !$('state').innerHTML.includes('color:var(--bad)')) state('Call ended.');
+}
+$('call').onclick = () => { if ($('call').classList.contains('live') || ws) { if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'hangup' })); finish(); } else start(); };
+$('mute').onclick = () => { muted = !muted; $('mute').textContent = muted ? 'Unmute mic' : 'Mute mic'; $('mute').classList.toggle('on', muted); };
+function sendTyped() { const t = $('typed').value.trim(); if (!t || !ws || ws.readyState !== 1) return; $('typed').value = ''; ws.send(JSON.stringify({ type: 'text', text: t })); }
+$('send').onclick = sendTyped; $('typed').onkeydown = e => { if (e.key === 'Enter') sendTyped(); };
+
+async function loadBooks() {
+  try {
+    const r = await fetch('/api/bookings'); if (!r.ok) { $('devcard').style.display = 'none'; return; }
+    const rows = await r.json();
+    $('books').innerHTML = rows.length ? rows.map(b => `<tr><td>${b.start.slice(0, 16).replace('T', ' ')}</td><td>${b.service}</td><td>${b.barber}</td><td>${b.name.replace(/[<>&]/g, '')}</td></tr>`).join('') : '<tr><td class="sub">none yet</td></tr>';
+  } catch (e) {}
+}
+loadBooks();
+fetch('/api/config').then(r => r.json()).then(c => { if (c.public) { $('dbg').style.display = 'none'; $('devcard').style.display = 'none'; } }).catch(() => {});
+</script>
+</body>
+</html>

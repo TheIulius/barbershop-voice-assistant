@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Barbershop Voice Assistant</title>
+<style>
+  :root { --bg:#f6f6f4; --card:#fff; --ink:#1c1c1a; --mute:#6b6b66; --line:#e2e2dd; --accent:#1f6f50; --bad:#b3261e; --me:#e8f1ec; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#161615; --card:#1f1f1d; --ink:#ecece8; --mute:#9a9a94; --line:#33332f; --accent:#4cc38a; --bad:#ff8a80; --me:#233229; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.45 system-ui, sans-serif; }
+  main { max-width:720px; margin:0 auto; padding:20px 16px 48px; }
+  h1 { font-size:20px; margin:0 0 4px; } .sub { color:var(--mute); font-size:14px; margin-bottom:16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:16px; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  button { font:inherit; cursor:pointer; border:1px solid var(--line); background:var(--card); color:var(--ink); border-radius:8px; padding:8px 14px; }
+  button.lang.on, button.eng.on { background:var(--accent); color:#fff; border-color:var(--accent); }
+  #call { background:var(--accent); color:#fff; border-color:var(--accent); font-size:18px; padding:12px 28px; border-radius:999px; }
+  #call.live { background:var(--bad); border-color:var(--bad); }
+  #status { color:var(--mute); font-size:14px; min-height:20px; margin-top:10px; }
+  #log { max-height:340px; overflow:auto; display:flex; flex-direction:column; gap:8px; }
+  .msg { padding:8px 12px; border-radius:10px; max-width:88%; border:1px solid var(--line); }
+  .msg.me { align-self:flex-end; background:var(--me); } .msg.ai { align-self:flex-start; }
+  .interim { color:var(--mute); font-style:italic; }
+  input[type=text] { flex:1; min-width:180px; font:inherit; padding:8px 10px; border-radius:8px; border:1px solid var(--line); background:var(--card); color:var(--ink); }
+  table { width:100%; border-collapse:collapse; font-size:14px; } td,th { text-align:left; padding:4px 6px; border-bottom:1px solid var(--line); }
+  .warn { color:var(--bad); font-size:14px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Barbershop voice assistant <span style="font-weight:400;color:var(--mute)">(prototype)</span></h1>
+  <div class="sub">Sample shop data. Press Call, allow the microphone, and just talk in Georgian, English or Russian. The green bar moves when it hears you.</div>
+
+  <div class="card">
+    <div class="row">
+      <button id="call">Call</button>
+      <span style="flex:1"></span>
+      <span class="sub" style="margin:0">I speak:</span>
+      <button class="lang" data-l="ka">ქართ</button>
+      <button class="lang" data-l="en">EN</button>
+      <button class="lang" data-l="ru">RU</button>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <span class="sub" style="margin:0">Microphone:</span>
+      <button class="eng" data-e="gemini">Any browser (Gemini)</button>
+      <button class="eng" data-e="chrome">Chrome built-in</button>
+    </div>
+    <div style="height:8px;background:var(--line);border-radius:4px;margin-top:12px;overflow:hidden"><div id="level" style="height:100%;width:0;background:var(--accent);transition:width .08s"></div></div>
+    <div id="status"></div>
+    <div id="health" class="warn"></div>
+  </div>
+
+  <div class="card">
+    <div id="log"></div>
+    <div class="row" style="margin-top:12px">
+      <input id="typed" type="text" placeholder="…or type here (also works without a microphone)" autocomplete="off">
+      <button id="send">Send</button>
+    </div>
+  </div>
+
+  <div class="card" id="bookcard">
+    <b>Bookings made (dev view)</b>
+    <table id="books"><tbody></tbody></table>
+  </div>
+</main>
+
+<script>
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+const RLANG = { ka: 'ka-GE', en: 'en-US', ru: 'ru-RU' };
+let sid = null, lang = 'ka', live = false, rec = null, busy = false, player = null;
+const $ = id => document.getElementById(id);
+const log = $('log'), statusEl = $('status');
+
+function status(t) { statusEl.textContent = t; }
+function add(cls, text) { const d = document.createElement('div'); d.className = 'msg ' + cls; d.textContent = text; log.appendChild(d); log.scrollTop = log.scrollHeight; return d; }
+function setLang(l) { lang = l; document.querySelectorAll('button.lang').forEach(b => b.classList.toggle('on', b.dataset.l === l)); }
+document.querySelectorAll('button.lang').forEach(b => b.onclick = () => { setLang(b.dataset.l); if (live && engine === 'chrome') { pause(); resume(); } });
+setLang('ka');
+
+async function api(path, body) {
+  const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+  if (!r.ok) throw new Error(path + ' ' + r.status);
+  return r;
+}
+
+let speakId = 0;
+function playUrl(url) { return new Promise((res, rej) => { player = new Audio(url); player.onended = res; player.onerror = rej; player.play().catch(rej); }); }
+async function speak(text) {
+  stopAudio(); const id = ++speakId;
+  // split into sentences and synthesise them in parallel: the first one starts playing sooner
+  let parts = (text.match(/[^.!?]+[.!?]*/g) || [text]).map(x => x.trim()).filter(Boolean);
+  while (parts.length > 3) { parts.splice(parts.length - 2, 2, parts[parts.length - 2] + ' ' + parts[parts.length - 1]); }
+  const reqs = parts.map(p => api('/api/tts', { text: p }).then(r => r.blob()).catch(() => null));
+  for (let i = 0; i < parts.length; i++) {
+    const blob = await reqs[i];
+    if (id !== speakId) return;
+    try { if (!blob) throw 0; await playUrl(URL.createObjectURL(blob)); }
+    catch (e) { await new Promise(res => { const u = new SpeechSynthesisUtterance(parts.slice(i).join(' ')); u.lang = RLANG[lang]; u.onend = res; u.onerror = res; speechSynthesis.speak(u); }); return; }
+  }
+}
+function stopAudio() { speakId++; if (player) { player.pause(); player = null; } speechSynthesis.cancel(); }
+
+async function ensureSession() {
+  if (sid) return null;
+  const r = await api('/api/start?lang=' + lang);
+  const j = await r.json(); sid = j.session_id; return j.text;
+}
+
+async function turn(text) {
+  busy = true; pause();
+  add('me', text); status('Thinking…'); const t0 = performance.now();
+  try {
+    const greet = await ensureSession();
+    const j = await (await api('/api/chat', { session_id: sid, text })).json();
+    add('ai', j.text);
+    if (j.lang && j.lang !== lang) setLang(j.lang);
+    if (j.booked) loadBooks();
+    const t1 = performance.now(); status('Speaking…'); await speak(j.text);
+    lastTiming = 'AI answered in ' + ((t1 - t0) / 1000).toFixed(1) + 's';
+  } catch (e) { status('Error: ' + e.message); }
+  busy = false;
+  if (live) resume(); else status('');
+}
+
+// ---------- microphone engines ----------
+let lastTiming = '', engine = 'gemini', armed = false, stream = null, actx = null, proc = null;
+function setEngine(e) { engine = e; document.querySelectorAll('button.eng').forEach(b => b.classList.toggle('on', b.dataset.e === e)); if (live) { pause(); resume(); } }
+document.querySelectorAll('button.eng').forEach(b => b.onclick = () => setEngine(b.dataset.e));
+setEngine('gemini');
+
+function pause() { armed = false; stopRec(); $('level').style.width = '0'; }
+function resume() { if (!live || busy) return; if (engine === 'chrome') listen(); else { armed = true; armedAt = performance.now(); status('Listening… just talk' + (lastTiming ? '   (' + lastTiming + ')' : '')); } }
+function stopRec() { if (rec) { rec.onend = null; rec.onresult = null; rec.onerror = null; try { rec.abort(); } catch (e) {} rec = null; } }
+
+// --- Gemini engine: record in the page, detect speech/silence, send WAV to /api/stt
+const TARGET = 16000;
+let chunks = [], speaking = false, quietMs = 0, loudMs = 0, floor = 0.01, speechMs = 0;
+async function openMic() {
+  if (stream) return;
+  stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 } });
+  actx = new (window.AudioContext || window.webkitAudioContext)();
+  await actx.resume();
+  const src = actx.createMediaStreamSource(stream);
+  proc = actx.createScriptProcessor(4096, 1, 1);
+  proc.onaudioprocess = e => onChunk(new Float32Array(e.inputBuffer.getChannelData(0)));
+  src.connect(proc); proc.connect(actx.destination);
+}
+function closeMic() { try { proc && proc.disconnect(); } catch (e) {} if (stream) stream.getTracks().forEach(t => t.stop()); if (actx) actx.close(); stream = actx = proc = null; }
+function rmsOf(a) { let t = 0; for (let i = 0; i < a.length; i++) t += a[i] * a[i]; return Math.sqrt(t / a.length); }
+// Rolling buffer: audio is ALWAYS being kept (even while the AI talks), so when the caller starts speaking
+// the beginning of the first word is already in hand. We only trust audio recorded after `armedAt - 250 ms`.
+let ring = [], armedAt = 0;
+function onChunk(a) {
+  const ms = a.length / actx.sampleRate * 1000, r = rmsOf(a), now = performance.now();
+  $('level').style.width = Math.min(100, r * 600) + '%';
+  if (!speaking) {
+    ring.push({ a, t: now }); if (ring.length > 12) ring.shift();
+    if (!armed || !live) { loudMs = 0; return; }
+    floor = Math.min(0.05, floor * 0.95 + r * 0.05);
+  }
+  const thr = Math.max(0.012, floor * 2.5);
+  if (!speaking) {
+    loudMs = r > thr ? loudMs + ms : 0;
+    if (loudMs >= 80) {
+      speaking = true; quietMs = 0; speechMs = 0;
+      chunks = ring.filter(c => c.t >= armedAt - 250).map(c => c.a); ring = [];
+      status('Hearing you…');
+    }
+  } else {
+    chunks.push(a); speechMs += ms;
+    quietMs = r > thr * 0.7 ? 0 : quietMs + ms;
+    if (quietMs >= 650 || speechMs > 15000) finishUtterance();
+  }
+}
+function toWav(parts, rate) {
+  const n = parts.reduce((s, p) => s + p.length, 0), all = new Float32Array(n); let o = 0;
+  for (const p of parts) { all.set(p, o); o += p.length; }
+  const ratio = rate / TARGET, len = Math.floor(n / ratio), pcm = new Int16Array(len);
+  for (let i = 0; i < len; i++) { let t = 0, c = 0; for (let j = Math.floor(i * ratio); j < Math.min(n, Math.floor((i + 1) * ratio)); j++) { t += all[j]; c++; } const v = Math.max(-1, Math.min(1, c ? t / c : 0)); pcm[i] = v * 0x7fff; }
+  const buf = new ArrayBuffer(44 + len * 2), v = new DataView(buf), w = (off, s) => [...s].forEach((ch, i) => v.setUint8(off + i, ch.charCodeAt(0)));
+  w(0, 'RIFF'); v.setUint32(4, 36 + len * 2, true); w(8, 'WAVEfmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, TARGET, true); v.setUint32(28, TARGET * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true); w(36, 'data'); v.setUint32(40, len * 2, true);
+  new Int16Array(buf, 44).set(pcm);
+  return new Blob([buf], { type: 'audio/wav' });
+}
+async function finishUtterance() {
+  const parts = chunks, ms = speechMs; speaking = false; chunks = []; quietMs = 0; armed = false;
+  if (ms < 350) { resume(); return; }
+  status('Transcribing…');
+  try {
+    const r = await fetch('/api/stt', { method: 'POST', headers: { 'Content-Type': 'audio/wav' }, body: toWav(parts, actx.sampleRate) });
+    if (!r.ok) throw new Error(r.status === 502 ? 'the speech service is busy or out of free quota; try again in a minute' : 'speech service ' + r.status);
+    const text = (await r.json()).text.trim();
+    if (!text) { resume(); return; }
+    turn(text);
+  } catch (e) { status('Error: ' + e.message); resume(); }
+}
+
+// --- Chrome engine (browser's own recognizer)
+function listen() {
+  if (!live || busy) return;
+  if (!SR) { status('This browser has no built-in speech recognition. Switch to "Any browser (Gemini)".'); return; }
+  stopRec();
+  rec = new SR(); rec.lang = RLANG[lang]; rec.interimResults = true; rec.continuous = false;
+  let interim = null, got = false;
+  rec.onstart = () => status('Listening… (' + RLANG[lang] + ')');
+  rec.onresult = ev => {
+    let fin = '', tmp = '';
+    for (let i = ev.resultIndex; i < ev.results.length; i++) (ev.results[i].isFinal ? (fin += ev.results[i][0].transcript) : (tmp += ev.results[i][0].transcript));
+    if (!interim) { interim = add('me interim', ''); }
+    interim.textContent = fin || tmp;
+    if (fin) { got = true; interim.remove(); interim = null; turn(fin.trim()); }
+  };
+  rec.onerror = ev => {
+    if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') { status('Microphone blocked. Allow it in the browser, or type below.'); live = false; render(); }
+    else if (ev.error === 'language-not-supported') { status('Chrome cannot recognise ' + RLANG[lang] + '. Switch to "Any browser (Gemini)".'); live = false; render(); }
+    else if (ev.error === 'network') { status('Chrome speech service unreachable. Switch to "Any browser (Gemini)".'); live = false; render(); }
+  };
+  rec.onend = () => { if (interim) { interim.remove(); interim = null; } if (live && !busy && !got) setTimeout(listen, 250); };
+  try { rec.start(); } catch (e) {}
+}
+
+function render() { $('call').textContent = live ? 'Hang up' : 'Call'; $('call').classList.toggle('live', live); }
+
+$('call').onclick = async () => {
+  if (live) { live = false; pause(); closeMic(); stopAudio(); sid = null; status('Call ended.'); render(); return; }
+  live = true; busy = true; render(); log.innerHTML = ''; sid = null;
+  try {
+    if (engine === 'gemini') await openMic();
+    const r = await api('/api/start?lang=' + lang); const j = await r.json(); sid = j.session_id;
+    add('ai', j.text); status('Speaking…'); await speak(j.text);
+  } catch (e) { status(e.name === 'NotAllowedError' ? 'Microphone blocked. Click the lock icon in the address bar and allow it.' : 'Error: ' + e.message); if (!stream && engine === 'gemini') { live = false; render(); busy = false; return; } }
+  busy = false; resume();
+};
+
+async function typed() {
+  const t = $('typed').value.trim(); if (!t || busy) return; $('typed').value = '';
+  const wasLive = live; await turn(t); live = wasLive;
+}
+$('send').onclick = typed;
+$('typed').onkeydown = e => { if (e.key === 'Enter') typed(); };
+
+async function loadBooks() {
+  try {
+    const r = await fetch('/api/bookings'); if (!r.ok) { $('bookcard').style.display = 'none'; return; }
+    const rows = await r.json();
+    $('books').querySelector('tbody').innerHTML = rows.length
+      ? rows.map(b => `<tr><td>${b.start.slice(0, 16).replace('T', ' ')}</td><td>${b.service}</td><td>${b.barber}</td><td>${b.name.replace(/[<>&]/g, '')}</td></tr>`).join('')
+      : '<tr><td class="sub">none yet</td></tr>';
+  } catch (e) {}
+}
+fetch('/api/health').then(r => r.json()).then(h => { if (!h.llm) $('health').textContent = 'Assistant not configured: ' + h.llm_error; });
+loadBooks();
+</script>
+</body>
+</html>

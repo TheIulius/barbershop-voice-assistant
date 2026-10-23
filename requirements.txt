@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+httpx
+websockets
+numpy
+edge-tts
+google-auth
+requests
+pydantic
+tzdata

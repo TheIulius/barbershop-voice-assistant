@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in</title>
+<style>
+  :root { --bg:#f6f6f4; --card:#fff; --ink:#1c1c1a; --mute:#6b6b66; --line:#e2e2dd; --accent:#1f6f50; --bad:#b3261e; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#161615; --card:#1f1f1d; --ink:#ecece8; --mute:#9a9a94; --line:#33332f; --accent:#4cc38a; --bad:#ff8a80; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.45 system-ui, sans-serif; display:grid; place-items:center; min-height:100vh; padding:16px; }
+  form { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:24px; width:100%; max-width:360px; }
+  h1 { font-size:18px; margin:0 0 4px; } .sub { color:var(--mute); font-size:14px; margin-bottom:16px; }
+  input { width:100%; font:inherit; padding:10px 12px; border-radius:8px; border:1px solid var(--line); background:var(--bg); color:var(--ink); }
+  button { width:100%; margin-top:12px; font:inherit; cursor:pointer; padding:10px; border-radius:8px; border:0; background:var(--accent); color:#fff; }
+  #err { color:var(--bad); font-size:14px; min-height:20px; margin-top:10px; }
+</style>
+</head>
+<body>
+<form id="f">
+  <h1>Barbershop voice assistant</h1>
+  <div class="sub">Private test. Enter the password to continue.</div>
+  <input id="pw" type="password" autocomplete="current-password" placeholder="Password" autofocus required>
+  <button id="go" type="submit">Sign in</button>
+  <div id="err"></div>
+</form>
+<script>
+document.getElementById('f').onsubmit = async e => {
+  e.preventDefault();
+  const go = document.getElementById('go'), err = document.getElementById('err');
+  go.disabled = true; err.textContent = '';
+  try {
+    const r = await fetch('/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: document.getElementById('pw').value }) });
+    const j = await r.json();
+    if (j.ok) { location.href = '/'; return; }
+    err.textContent = j.error || 'Could not sign in.';
+  } catch (x) { err.textContent = 'Network problem. Try again.'; }
+  go.disabled = false;
+};
+</script>
+</body>
+</html>

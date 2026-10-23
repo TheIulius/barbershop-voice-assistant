@@ -1,0 +1,52 @@
+{
+  "_comment": "SAMPLE DATA for testing. Replace with a real barbershop's information.",
+  "name": {"ka": "ნიმუშის ბარბერშოპი", "en": "Sample Barbershop", "ru": "Образцовый барбершоп"},
+  "address": {
+    "ka": "რუსთაველის გამზირი 1, თბილისი",
+    "en": "1 Rustaveli Avenue, Tbilisi",
+    "ru": "проспект Руставели 1, Тбилиси"
+  },
+  "phone_public": "+995 32 000 00 00",
+  "timezone": "Asia/Tbilisi",
+  "slot_minutes": 30,
+  "min_lead_minutes": 60,
+  "max_days_ahead": 30,
+  "hours": {
+    "mon": ["10:00", "20:00"],
+    "tue": ["10:00", "20:00"],
+    "wed": ["10:00", "20:00"],
+    "thu": ["10:00", "20:00"],
+    "fri": ["10:00", "20:00"],
+    "sat": ["11:00", "18:00"],
+    "sun": null
+  },
+  "services": {
+    "haircut": {"ka": "თმის შეჭრა", "en": "Haircut", "ru": "Стрижка", "price_gel": 30, "minutes": 30},
+    "beard": {"ka": "წვერის მოწესრიგება", "en": "Beard trim", "ru": "Моделирование бороды", "price_gel": 20, "minutes": 30},
+    "combo": {"ka": "თმის შეჭრა და წვერი", "en": "Haircut and beard", "ru": "Стрижка и борода", "price_gel": 45, "minutes": 60}
+  },
+  "barbers": {
+    "giorgi": {"name": {"ka": "გიორგი", "en": "Giorgi", "ru": "Гиорги"}, "days_off": ["sun"], "calendar_id": ""},
+    "nika": {"name": {"ka": "ნიკა", "en": "Nika", "ru": "Ника"}, "days_off": ["sun", "mon"], "calendar_id": ""}
+  },
+  "faq": [
+    {
+      "topic": "parking",
+      "ka": "ბარბერშოპის წინ ფასიანი ქუჩის პარკინგია.",
+      "en": "There is paid street parking in front of the shop.",
+      "ru": "Перед барбершопом есть платная уличная парковка."
+    },
+    {
+      "topic": "payment",
+      "ka": "გადახდა შესაძლებელია ნაღდი ფულით და ბარათით.",
+      "en": "You can pay by cash or card.",
+      "ru": "Оплата наличными или картой."
+    },
+    {
+      "topic": "cancellation",
+      "ka": "თუ ვიზიტს ვერ მოახერხებთ, გთხოვთ ერთი საათით ადრე შეგვატყობინოთ.",
+      "en": "If you cannot come, please tell us at least one hour in advance.",
+      "ru": "Если не сможете прийти, предупредите нас хотя бы за час."
+    }
+  ]
+}

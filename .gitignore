@@ -1,0 +1,12 @@
+.venv/
+.env
+*.json.key
+service-account*.json
+__pycache__/
+.pytest_cache/
+data/bookings.jsonl
+data/local_calendar.json
+data/callbacks.jsonl
+data/tts_cache/
+data/debug_audio/
+DEPLOY_SECRETS.local.txt
