@@ -85,13 +85,14 @@ def test_no_nudge_when_it_is_not_the_callers_turn(call):
 def test_caller_silence_gets_gentle_prompt_then_hangup(call):
     g = FakeG()
     call.waiting_for_caller = True
-    call.last_activity = time.time() - 11
+    call.last_activity = call.last_voice_at = time.time() - 11
     asyncio.run(run_watchdog(call, g, 1.5))
     assert any("still there" in t for t in texts(g))
     call.nudges = 2
-    call.last_activity = time.time() - 11
+    call.last_activity = call.last_voice_at = time.time() - 11
     assert asyncio.run(run_watchdog(call, g, 1.5))
     assert any(e["type"] == "hangup" for e in call.ws.events)
+    assert call.end_reason == "caller_silent_after_2_prompts"
 
 
 def test_unexpected_google_disconnect_is_reported(call):
@@ -108,3 +109,48 @@ def test_unexpected_google_disconnect_is_reported(call):
             raise StopAsyncIteration
     asyncio.run(call.from_gemini(ClosingG()))
     assert any(e["type"] == "error" and "1011" in e["text"] for e in call.ws.events)
+
+
+def test_sound_from_the_caller_counts_as_presence_no_hangup(call):
+    g = FakeG()
+    call.waiting_for_caller = True
+    call.nudges = 2
+    call.last_activity = time.time() - 60
+    call.last_voice_at = time.time()          # the caller is making sound right now
+    assert not asyncio.run(run_watchdog(call, g, 1.5))
+    assert texts(g) == [] and not any(e["type"] == "hangup" for e in call.ws.events)
+
+
+def test_noisy_line_gets_a_quieter_spot_request_not_a_hangup(call):
+    g = FakeG()
+    call.waiting_for_caller = True
+    call.loud.extend([True] * 200)             # loud audio the whole time, but no words recognised
+    call.last_user_text_at = time.time() - 20
+    call.last_activity = time.time() - 60
+    assert not asyncio.run(run_watchdog(call, g, 1.5))
+    assert any("background noise" in t for t in texts(g))
+    assert not any("still there" in t for t in texts(g))
+    assert not any(e["type"] == "hangup" for e in call.ws.events)
+
+
+def test_line_that_stays_too_noisy_ends_with_a_clear_message(call):
+    g = FakeG()
+    call.waiting_for_caller = True
+    call.loud.extend([True] * 200)
+    call.last_user_text_at = time.time() - 60
+    call.noise_notes = 3
+    call.last_noise_note = time.time() - 30
+    assert asyncio.run(run_watchdog(call, g, 1.5))
+    assert any(e["type"] == "error" and "too noisy" in e["text"] for e in call.ws.events)
+    assert call.end_reason == "noisy_line_no_speech_recognised"
+
+
+def test_call_summary_records_reason_and_trail(call, capsys):
+    from app import live
+    live.CALL_LOG.clear()
+    call.note("caller", text="გამარჯობა")
+    call.end_reason = "caller_left (browser closed or connection dropped)"
+    call._record_call()
+    rec = live.CALL_LOG[-1]
+    assert rec["reason"].startswith("caller_left") and rec["trail"][0]["what"] == "caller"
+    assert "[calllog]" in capsys.readouterr().out

@@ -21,7 +21,7 @@ from .llm import LLMError, make_llm
 from .shop import Shop
 from . import tts
 from .lab import router as lab_router
-from .live import handle_call
+from .live import handle_call, CALL_LOG
 from .auth import Auth, AuthMiddleware, make_router
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -114,6 +114,12 @@ async def ws_call(ws: WebSocket):
         return
     ip = auth.client_ip({k.decode().lower(): v.decode() for k, v in ws.scope["headers"]}, ws.client and (ws.client.host, 0)) if auth else None
     await handle_call(ws, agent, (not PUBLIC) and os.environ.get("DEBUG_UI", "1") == "1", ip)
+
+
+@app.get("/api/calls")
+def calls(limit: int = 20):
+    """Recent calls with their event trail and the reason each one ended (memory only; resets when the server restarts)."""
+    return list(CALL_LOG)[-max(1, min(limit, 40)):][::-1]
 
 
 @app.get("/api/config")

@@ -103,6 +103,40 @@ class Pcm extends AudioWorkletProcessor {
 }
 registerProcessor('pcm', Pcm);`;
 
+
+// ---- one 40 ms microphone frame: level meter, speaker-mode protection, and a noise gate for noisy rooms
+const SILENCE = new ArrayBuffer(1280);
+let floorEst = 0.004, gateOpen = true, hang = 0, preroll = [], recent = [];
+function processMicFrame(pcm, rms) {
+  $('level').style.width = Math.min(100, rms * 500) + '%';
+  if (!(ws && ws.readyState === 1) || muted) return;
+  // Speaker mode (no headphones): while the assistant is talking, only let real, loud speech through, so its own
+  // voice leaking into the microphone cannot make Gemini think you interrupted.
+  let allowed = true;
+  if (sources.length && !$('hp').checked) {
+    loudRun = rms > 0.05 ? loudRun + 1 : 0;
+    if (loudRun >= 4) { if (!bargeOpen) dlog('barge-in opened', { rms: +rms.toFixed(3) }); bargeOpen = true; }
+    allowed = bargeOpen;
+  } else { loudRun = 0; if (!sources.length) bargeOpen = false; }
+  if (!allowed) { ws.send(SILENCE); return; }
+  // Noise gate, only in a noisy room: constant background noise confuses Gemini's speech detection (it never decides you
+  // have stopped talking). We track the room's noise level; if it is high, frames at noise level are replaced by silence,
+  // and the 320 ms before speech starts are sent too so the first word is not clipped.
+  recent.push(rms); if (recent.length > 100) recent.shift();           // the quietest 20% of the last 4 s = the room's noise level
+  if (recent.length >= 25) { const s = [...recent].sort((a, b) => a - b); floorEst = s[Math.floor(s.length * 0.2)]; }
+  if (floorEst > 0.012) {
+    const thr = floorEst * 2 + 0.008;
+    preroll.push(pcm); if (preroll.length > 8) preroll.shift();
+    if (rms > thr) {
+      hang = 12;
+      if (!gateOpen) { gateOpen = true; dlog('noise gate opened', { floor: +floorEst.toFixed(3) }); preroll.slice(0, -1).forEach(f => ws.send(f)); }
+    } else if (hang > 0) hang--; else gateOpen = false;
+    if (!gateOpen) { ws.send(SILENCE); return; }
+    preroll = [];
+  } else { gateOpen = true; preroll = []; }
+  ws.send(pcm);
+}
+
 async function openAudio() {
   outCtx = new AudioContext({ sampleRate: 24000 }); await outCtx.resume();
   stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: !$('raw').checked, noiseSuppression: !$('raw').checked, autoGainControl: !$('raw').checked, channelCount: 1 } });
@@ -110,21 +144,7 @@ async function openAudio() {
   await micCtx.audioWorklet.addModule(URL.createObjectURL(new Blob([WORKLET], { type: 'application/javascript' })));
   const src = micCtx.createMediaStreamSource(stream);
   node = new AudioWorkletNode(micCtx, 'pcm');
-  const SILENCE = new ArrayBuffer(1280);
-  node.port.onmessage = e => {
-    const rms = e.data.rms;
-    $('level').style.width = Math.min(100, rms * 500) + '%';
-    if (!(ws && ws.readyState === 1) || muted) return;
-    // Speaker mode (no headphones): while the assistant is talking, only let real, loud speech through, so its own
-    // voice leaking into the microphone cannot make Gemini think you interrupted.
-    let send = true;
-    if (sources.length && !$('hp').checked) {
-      loudRun = rms > 0.05 ? loudRun + 1 : 0;
-      if (loudRun >= 4) { if (!bargeOpen) dlog('barge-in opened', { rms: +rms.toFixed(3) }); bargeOpen = true; }
-      send = bargeOpen;
-    } else { loudRun = 0; if (!sources.length) bargeOpen = false; }
-    ws.send(send ? e.data.pcm : SILENCE);
-  };
+  node.port.onmessage = e => processMicFrame(e.data.pcm, e.data.rms);
   src.connect(node);
 }
 function closeAudio() {

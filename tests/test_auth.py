@@ -38,7 +38,7 @@ def login(client, pw=PASSWORD):
     return client.post("/login", json={"password": pw})
 
 
-PROTECTED_GET = ["/", "/classic", "/lab", "/api/health", "/api/bookings", "/api/config", "/api/lab/options", "/docs", "/openapi.json", "/static/live.html"]
+PROTECTED_GET = ["/api/calls", "/", "/classic", "/lab", "/api/health", "/api/bookings", "/api/config", "/api/lab/options", "/docs", "/openapi.json", "/static/live.html"]
 PROTECTED_POST = ["/api/start", "/api/chat", "/api/stt", "/api/tts", "/api/lab/tts", "/logout-not-a-route"]
 
 
@@ -203,3 +203,10 @@ def test_public_mode_refuses_to_start_without_password(monkeypatch):
     monkeypatch.delenv("APP_PASSWORD_HASH")
     with pytest.raises(RuntimeError):
         Auth.from_env()
+
+
+def test_call_log_endpoint_needs_login_then_returns_list(client):
+    assert client.get("/api/calls").status_code == 401
+    login(client)
+    r = client.get("/api/calls")
+    assert r.status_code == 200 and isinstance(r.json(), list)

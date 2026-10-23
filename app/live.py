@@ -16,6 +16,7 @@ import base64
 import json
 import os
 import re
+import secrets
 import time
 from collections import defaultdict, deque
 from typing import Optional
@@ -38,6 +39,8 @@ MAX_CALL_SECONDS = int(os.environ.get("MAX_CALL_SECONDS", 6 * 60))
 DAILY_CALL_MINUTES = float(os.environ.get("DAILY_CALL_MINUTES", 0))      # 0 = no cap (local use); set a cap when public
 MAX_CONCURRENT_CALLS = int(os.environ.get("MAX_CONCURRENT_CALLS", 0))   # 0 = no cap
 _budget = {"day": "", "seconds": 0.0, "active": 0}
+CALL_LOG = deque(maxlen=40)                                          # recent call summaries, newest last (memory only)
+KEEP_TRANSCRIPTS = os.environ.get("KEEP_TRANSCRIPTS", "1") == "1"    # test phase: keep the words so failures can be diagnosed
 SILENCE_NUDGE_S = 10
 MAX_TOOL_CALLS = 30
 
@@ -214,6 +217,15 @@ class LiveCall:
         self.first_audio_ms: Optional[int] = None
         self.speech_end_at: Optional[float] = None
         self.lang_corrections = 0
+        self.call_id = secrets.token_hex(4)
+        self.started_at = time.time()
+        self.trail = []                    # [(seconds_into_call, what, details)]
+        self.end_reason = ""
+        self.loud = deque(maxlen=300)      # last ~12 s of 40 ms frames: was the caller's audio loud?
+        self.last_voice_at = time.time()   # last time loud audio came from the caller (speech OR noise)
+        self.last_user_text_at = time.time()
+        self.noise_notes = 0
+        self.last_noise_note = 0.0
         self.playing = False          # the caller's browser is still playing the assistant's audio
         self.waiting_for_caller = False   # the assistant finished a turn and it is now the caller's move
         self.pending_since = None     # when we answered a tool call and are waiting for the model to speak
@@ -230,7 +242,13 @@ class LiveCall:
         self.bg = set()
 
     # ---------- helpers -------------------------------------------------
+    def note(self, what: str, **details) -> None:
+        if len(self.trail) < 400:
+            self.trail.append((round(time.time() - self.started_at, 1), what, details))
+
     async def emit(self, **ev) -> None:
+        if ev.get("type") in ("error", "tool", "booked", "interrupted", "hangup", "callback"):
+            self.note(ev["type"], **{k: v for k, v in ev.items() if k not in ("type", "args")})
         try:
             await self.ws.send_text(json.dumps(ev, ensure_ascii=False))
         except Exception:
@@ -344,6 +362,7 @@ class LiveCall:
         while True:
             msg = await self.ws.receive()
             if msg.get("type") == "websocket.disconnect":
+                self.end_reason = self.end_reason or "caller_left (browser closed or connection dropped)"
                 return
             if msg.get("bytes") is not None:
                 data = msg["bytes"]
@@ -354,6 +373,10 @@ class LiveCall:
                     self.mic_peak = max(self.mic_peak, pk)
                     self.mic_clipped += pk >= 32000
                     self.mic_loud += pk >= 1500
+                    is_loud = pk >= 2500
+                    self.loud.append(is_loud)
+                    if is_loud:
+                        self.last_voice_at = time.time()
                     if self.save_audio:
                         self.audio_chunks.append(data)
                     if self.debug:
@@ -365,6 +388,7 @@ class LiveCall:
                 except ValueError:
                     continue
                 if c.get("type") == "hangup":
+                    self.end_reason = self.end_reason or "caller_pressed_hang_up"
                     return
                 if c.get("type") == "playing":
                     self.playing = bool(c.get("value"))
@@ -422,6 +446,8 @@ class LiveCall:
         if self.user_buf.strip():
             text = self.user_buf.strip()
             self.live_heard.append(text)
+            self.last_user_text_at = time.time()
+            self.note("caller", text=text[:200] if KEEP_TRANSCRIPTS else "(hidden)")
             # (language is NOT guessed from transcripts: Georgian speech is often transcribed in Latin letters)
             if self.awaiting_confirm:
                 self.since_readback += " " + text
@@ -434,10 +460,12 @@ class LiveCall:
             rc = getattr(e, "rcvd", None)
             code, reason = getattr(rc, "code", None), getattr(rc, "reason", "")
             print(f"[call] Gemini closed the connection: code={code} reason={reason!r}", flush=True)
+            self.end_reason = f"google_closed_connection code={code} {reason}"
             await self.emit(type="error", text=f"The voice service disconnected (code {code}). Press Call to start again.")
             return
         if getattr(g, "close_code", None) is not None:   # the loop ended because Google closed the session
             print(f"[call] Gemini ended the session: code={g.close_code} reason={g.close_reason!r}", flush=True)
+            self.end_reason = f"google_ended_session code={g.close_code} {g.close_reason}"
             await self.emit(type="error", text=f"The voice service ended the session (code {g.close_code}). Press Call to start again.")
 
     async def _from_gemini_loop(self, g) -> None:
@@ -447,6 +475,7 @@ class LiveCall:
                 self.tokens = m["usageMetadata"].get("totalTokenCount", self.tokens)
             if "goAway" in m:
                 await self.emit(type="error", text="The session time limit was reached.")
+                self.end_reason = self.end_reason or "google_session_time_limit"
                 return
             sc = m.get("serverContent")
             if sc:
@@ -475,6 +504,7 @@ class LiveCall:
                     if self.agent.canary.lower() in self.ai_buf.lower():
                         await self.emit(type="error", text="Call ended for safety.")
                         print("[call] canary leaked -> call terminated", flush=True)
+                        self.end_reason = "safety_canary_leak"
                         return
                     wrong = foreign_language(self.ai_buf) or (LOCK_LANGUAGE and len(self.ai_buf) > 8 and script_mismatch(self.ai_buf, self.lang0))
                     if wrong and self.lang_corrections < 3:
@@ -496,6 +526,8 @@ class LiveCall:
                     self.waiting_for_caller = True
                     self.pending_since = None
                     self._flush_user()
+                    if self.ai_buf.strip():
+                        self.note("assistant", text=self.ai_buf.strip()[:200] if KEEP_TRANSCRIPTS else "(hidden)")
                     self.ai_buf = ""
                     await self.emit(type="turn_end", latency_ms=self.first_audio_ms)
                     self.first_audio_ms = None
@@ -503,6 +535,7 @@ class LiveCall:
                     self.last_activity = time.time()
                     if self.want_hangup:
                         await self.emit(type="hangup")
+                        self.end_reason = self.end_reason or "assistant_ended_call_after_goodbye"
                         await asyncio.sleep(0.5)
                         return
             tc = m.get("toolCall")
@@ -526,6 +559,7 @@ class LiveCall:
             now = time.time()
             if now - self.t0 > MAX_CALL_SECONDS:
                 await self.emit(type="error", text="Maximum call length reached (a test limit).")
+                self.end_reason = self.end_reason or "max_call_length"
                 return
             if self.playing or self.model_speaking:     # never talk over (or cut off) the assistant's own sentence
                 self.last_activity = now
@@ -535,9 +569,11 @@ class LiveCall:
                 if stalled > 25:
                     print("[call] model never answered after a tool result: ending the call", flush=True)
                     await self.emit(type="error", text="The voice service stopped answering. Press Call to start again.")
+                    self.end_reason = self.end_reason or "model_stopped_answering_after_tool_result"
                     return
                 if stalled > 8 and not self.stall_nudged:
                     self.stall_nudged = True
+                    self.note("stall_nudge", seconds=int(stalled))
                     print(f"[call] model silent {stalled:.0f}s after a tool result: nudging it to answer", flush=True)
                     await g.send(json.dumps({"realtimeInput": {"text": "[system note: the lookup finished. Tell the caller the result now, in the call language, in one or two short sentences.]"}}))
                 self.last_activity = now
@@ -545,14 +581,43 @@ class LiveCall:
             if not self.waiting_for_caller:              # mid-exchange: not the caller's silence
                 self.last_activity = now
                 continue
-            idle = now - self.last_activity
+            # A noisy line: lots of loud audio but no recognisable words for a while. Noise is NOT silence, so it must
+            # never trigger "are you still there?" or a hang-up; instead ask the caller to find a quieter spot.
+            loud_ratio = (sum(self.loud) / len(self.loud)) if len(self.loud) >= 100 else 0.0
+            if loud_ratio > 0.5 and now - self.last_user_text_at > 12:
+                self.last_activity = now
+                if self.noise_notes >= 3 and now - self.last_noise_note > 20:
+                    await self.emit(type="error", text="The line is too noisy for me to understand. Please call again from a quieter place.")
+                    self.end_reason = self.end_reason or "noisy_line_no_speech_recognised"
+                    return
+                if self.noise_notes < 3 and now - self.last_noise_note > 25:
+                    self.noise_notes += 1
+                    self.last_noise_note = now
+                    self.note("noise_note", n=self.noise_notes, loud_pct=int(100 * loud_ratio))
+                    await g.send(json.dumps({"realtimeInput": {"text": "[system note: there is a lot of background noise and you cannot make out what the caller says. In the call language, in one short sentence, ask them to move somewhere quieter or speak closer to the microphone.]"}}))
+                continue
+            idle = now - max(self.last_activity, self.last_voice_at)   # any real sound from the caller counts as presence
             if idle > SILENCE_NUDGE_S and self.nudges < 2:
                 self.nudges += 1
                 self.last_activity = now
+                self.note("still_there_prompt", n=self.nudges)
                 await g.send(json.dumps({"realtimeInput": {"text": "[system note: the caller has been silent for a while. Gently ask, in their language, if they are still there. One short sentence.]"}}))
             elif idle > SILENCE_NUDGE_S and self.nudges >= 2:
                 await self.emit(type="hangup")
+                self.end_reason = self.end_reason or "caller_silent_after_2_prompts"
                 return
+
+    def _record_call(self) -> None:
+        summary = {
+            "id": self.call_id, "started_utc": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(self.started_at)),
+            "seconds": round(time.time() - self.started_at, 1), "reason": self.end_reason or "unknown",
+            "model": getattr(self, "model", "?"), "lang": self.lang0, "tools": self.tool_calls, "tokens": self.tokens,
+            "mic": {"frames": self.mic_frames, "peak": round(self.mic_peak / 32768, 2),
+                    "loud_pct": round(100 * self.mic_loud / max(1, self.mic_frames))},
+            "trail": [{"t": t, "what": w, **d} for t, w, d in self.trail[:300]],
+        }
+        CALL_LOG.append(summary)
+        print("[calllog] " + json.dumps(summary, ensure_ascii=False), flush=True)
 
     async def run(self) -> None:
         await self.ws.accept()
@@ -563,6 +628,8 @@ class LiveCall:
             net = any(k in str(e) for k in ("gaierror", "nodename", "ConnectError", "Network is unreachable", "timed out", "OSError"))
             await self.emit(type="error", text=("Cannot reach Google's servers: this computer's internet or DNS is down for a moment. Check your connection and press Call again."
                                                 if net else "Could not start the voice session (free quota used up? try again in a minute)."))
+            self.end_reason = f"could_not_connect_to_google: {str(e)[:120]}"
+            self._record_call()
             await self.ws.close()
             return
         await self.emit(type="ready", model=self.model, voice=VOICE)
@@ -577,11 +644,13 @@ class LiveCall:
                 if t.exception() and not isinstance(t.exception(), (WebSocketDisconnect, websockets.ConnectionClosed)):
                     import traceback
                     print(f"[call] error: {t.exception()!r}", flush=True)
+                    self.end_reason = self.end_reason or f"server_error {type(t.exception()).__name__}: {str(t.exception())[:100]}"
                     traceback.print_exception(type(t.exception()), t.exception(), t.exception().__traceback__)
                     await self.emit(type="error", text="Something went wrong on the server. Press Call to start again.")
         finally:
             await g.close()
             _budget["seconds"] += time.time() - self.t0
+            self._record_call()
             print(f"[call] ended after {time.time() - self.t0:.0f}s, tools={self.tool_calls}, tokens~{self.tokens}, model={self.model}", flush=True)
             if self.mic_frames:
                 print(f"[mic] frames={self.mic_frames} peak={self.mic_peak / 32768:.2f} clipped_frames={self.mic_clipped} "
