@@ -34,7 +34,7 @@ def sim(a, b):
 
 
 async def one(full, first, sur):
-    lines = ["გამარჯობა, მინდა თმის შეჭრა ხვალ გიორგისთან, სამ საათზე.", f"{full}, ნომერი 555 123 457.", "დიახ, სწორია.", f"დიახ, {first}."]
+    lines = ["გამარჯობა, მინდა თმის შეჭრა ორშაბათს გიორგისთან, სამ საათზე.", f"{full}, ნომერი 555 123 457.", "დიახ, სწორია.", f"დიახ, {first}."]
     audio, ev = deque(), {"book": None, "asked_surname": False, "last": time.time(), "turn_end": False, "texts": []}
     async with websockets.connect("ws://localhost:" + __import__("os").environ.get("PORT", "8000") + "/ws/call?lang=ka", max_size=None) as ws:
         async def sender():

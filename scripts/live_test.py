@@ -30,6 +30,8 @@ async def say_pcm(text, voice=None, noise_db=None, gain=1.0):
 
 # lines may be "text" or ("text", voice, noise_db, gain)
 SCENARIOS = {
+ "booking_mon_en": ("en", ["Hi, I'd like a haircut on Monday with Giorgi, around three in the afternoon.", "My name is Nino and my number is 5 5 5, 1 2 3, 4 5 6.", "Yes, that number is correct.", "__AFTER_BOOK__Yes, that's right.", "No, that's all. Thank you, bye!"]),
+ "booking_mon_ka": ("ka", ["გამარჯობა, მინდა თმის შეჭრა ორშაბათს გიორგისთან, დაახლოებით სამ საათზე.", "მე ვარ ნინო, ნომერი 555 123 457.", "დიახ, ნომერი სწორია.", "__AFTER_BOOK__დიახ, სწორია.", "არა, მადლობა, ნახვამდის."]),
  "services_ka": ("ka", ["გამარჯობა, რა სერვისები გაქვთ?"]),
  "services_en": ("en", ["Hi, what services do you have?"]),
  "robust_ka": ("ka", [("¿Qué? Hola, ¿qué tal?", "es-ES-ElviraNeural", None, 1.0), ("კი", "ka-GE-EkaNeural", 8, 0.5), ("გამარჯობა, მინდა თმის შეჭრა ხვალ სამ საათზე.", "ka-GE-GiorgiNeural", 10, 0.4),

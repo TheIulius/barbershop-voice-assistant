@@ -77,7 +77,7 @@ let ws = null, stream = null, micCtx = null, outCtx = null, node = null;
 const dlogBuf = []; let t0call = 0;
 function dlog(what, extra) { dlogBuf.push({ t: Math.round(performance.now() - t0call), what, queued_s: outCtx ? +Math.max(0, nextT - outCtx.currentTime).toFixed(2) : 0, ...extra }); if (dlogBuf.length > 400) dlogBuf.shift(); }
 let loudRun = 0, bargeOpen = false;
-let nextT = 0, sources = [], lang = 'ka', muted = false, hangingUp = false;
+let firstTurnEnded = false, nextT = 0, sources = [], lang = 'ka', muted = false, hangingUp = false;
 let userEl = null, aiEl = null, aiText = '', better = { text: '', t: 0 };
 
 function state(html) { $('state').innerHTML = html; }
@@ -107,12 +107,16 @@ registerProcessor('pcm', Pcm);`;
 
 // ---- one 40 ms microphone frame: level meter, speaker-mode protection, and a noise gate for noisy rooms
 const SILENCE = new ArrayBuffer(1280);
-let floorEst = 0.004, gateOpen = true, hang = 0, preroll = [], recent = [];
+let greetingDone = false, greetStart = 0, floorEst = 0.004, gateOpen = true, hang = 0, preroll = [], recent = [];
 // Playing = audio is still scheduled ahead of the audio clock. Do not rely on 'ended' events (they can be missed).
-function isPlaying() { return !!outCtx && (nextT - outCtx.currentTime) > 0.05; }
+function isPlaying() { return !!outCtx && nextT > 0 && outCtx.currentTime < nextT + 0.5; }   // +0.5 s tail: room echo and tiny gaps between chunks
 function processMicFrame(pcm, rms) {
   $('level').style.width = Math.min(100, rms * 500) + '%';
   if (!(ws && ws.readyState === 1) || muted) return;
+  if (!greetingDone) {   // let the greeting finish: nothing from the microphone is sent until then (max 15 s)
+    if ((firstTurnEnded && !isPlaying()) || performance.now() - greetStart > 15000) greetingDone = true;
+    else { ws.send(SILENCE); return; }
+  }
   // Speaker mode (no headphones): while the assistant is talking, only let real, loud speech through, so its own
   // voice leaking into the microphone cannot make Gemini think you interrupted.
   let allowed = true;
@@ -184,8 +188,8 @@ function flushPlayback() { sources.forEach(s => { s.onended = null; try { s.stop
 async function start() {
   $('call').disabled = true; state('Connecting…'); $('log').innerHTML = ''; hangingUp = false; userEl = aiEl = null; aiText = '';
   try { await openAudio(); } catch (e) { state('<span style="color:var(--bad)">Microphone problem: ' + (e.message || e.name) + '. Click the lock icon in the address bar and allow the microphone.</span>'); closeAudio(); $('call').disabled = false; return; }
-  ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/call?lang=' + lang + ($('save').checked ? '&save_audio=1' : ''));
-  ws.binaryType = 'arraybuffer'; t0call = performance.now(); dlogBuf.length = 0; bargeOpen = false; skippedSilence = 0;
+  ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/call?lang=' + lang + ($('hp').checked ? '&hp=1' : '') + ($('save').checked ? '&save_audio=1' : ''));
+  ws.binaryType = 'arraybuffer'; t0call = performance.now(); dlogBuf.length = 0; bargeOpen = false; skippedSilence = 0; greetingDone = false; firstTurnEnded = false; greetStart = performance.now();
   ws.onmessage = ev => { if (typeof ev.data !== 'string') { playChunk(ev.data); return; } onEvent(JSON.parse(ev.data)); };
   ws.onclose = () => { if ($('call').classList.contains('live') || ws) { if (!sources.length) finish(); else hangingUp = true; } };
   $('call').disabled = false;
@@ -197,7 +201,7 @@ function onEvent(e) {
   else if (e.type === 'heard2') { better = { text: e.text, t: performance.now() }; const last = [...document.querySelectorAll('.msg.me')].pop(); if (last && last.dataset.unclear === '1') { last.textContent = e.text; last.dataset.unclear = ''; } }
   else if (e.type === 'ai') { if (userEl) userEl.dataset.done = '1'; if (!aiEl) aiEl = add('ai', ''); aiEl.textContent = e.text; state('<b>Assistant is talking</b> — you can interrupt'); }
   else if (e.type === 'interrupted') { dlog('FLUSH playback', { sources: sources.length, mic_rms: +(+$('level').style.width.replace('%','') / 500).toFixed(3) }); const t = document.createElement('div'); t.className = 'tool'; t.textContent = '· interrupted ·'; $('log').appendChild(t); flushPlayback(); if (aiEl) aiEl.classList.add('cut'); aiEl = null; state('<b>Interrupted</b> — go ahead'); }
-  else if (e.type === 'turn_end') { aiEl = null; userEl = null; state('<b>Listening…</b>' + (e.latency_ms ? ' <span class="sub">(replied in ' + (e.latency_ms / 1000).toFixed(1) + ' s)</span>' : '')); }
+  else if (e.type === 'turn_end') { firstTurnEnded = true; aiEl = null; userEl = null; state('<b>Listening…</b>' + (e.latency_ms ? ' <span class="sub">(replied in ' + (e.latency_ms / 1000).toFixed(1) + ' s)</span>' : '')); }
   else if (e.type === 'tool') { const t = document.createElement('div'); t.className = 'tool'; t.textContent = '· ' + ({ check_availability: 'checking the calendar', book: 'preparing booking', confirm_booking: 'confirming booking', cancel_pending: 'cancelling', request_callback: 'saving callback', end_call: 'ending call' }[e.name] || e.name) + ' ·'; $('log').appendChild(t); $('log').scrollTop = 1e9; }
   else if (e.type === 'booked') { const t = document.createElement('div'); t.className = 'tool ok'; t.textContent = '✔ Booked: ' + e.service + ' · ' + e.start + ' · ' + e.name; $('log').appendChild(t); loadBooks(); }
   else if (e.type === 'hangup') { hangingUp = true; if (!sources.length) finish(); }

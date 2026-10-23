@@ -52,7 +52,7 @@ NEG = {"no", "nope", "wrong", "incorrect", "cancel", "not", "нет", "неве�
        "არა", "არასწორია", "გაუქმება", "არ"}
 
 VOICE = os.environ.get("GEMINI_VOICE", "Kore")
-VAD_START = os.environ.get("VAD_START", "HIGH")                 # START_SENSITIVITY_<HIGH|LOW>: HIGH catches short/quiet words
+VAD_START = os.environ.get("VAD_START", "")                     # "" = automatic: HIGH with headphones (catches short/quiet words), LOW without (speaker echo must not interrupt)
 VAD_PREFIX_MS = int(os.environ.get("VAD_PREFIX_MS", 400))       # audio kept from before speech was detected
 VAD_SILENCE_MS = int(os.environ.get("VAD_SILENCE_MS", 700))     # quiet needed before the caller's turn is over
 UNCLEAR_STYLE = os.environ.get("UNCLEAR_STYLE", "new")          # "new" = best guess + confirm ; "old" = just ask to repeat
@@ -229,6 +229,7 @@ class LiveCall:
         self.speech_end_at: Optional[float] = None
         self.lang_corrections = 0
         self.call_id = secrets.token_hex(4)
+        self.headphones = False
         self.started_at = time.time()
         self.trail = []                    # [(seconds_into_call, what, details)]
         self.end_reason = ""
@@ -272,20 +273,31 @@ class LiveCall:
                                                   **({"languageCode": LANG_CODE[self.lang0]} if LOCK_LANGUAGE else {})}},
             "systemInstruction": {"parts": [{"text": build_prompt(self.agent, self.lang0)}]},
             "tools": TOOLS,
-            "contextWindowCompression": {"slidingWindow": {}},   # keeps long calls healthy instead of piling up context
             "inputAudioTranscription": {},
             "outputAudioTranscription": {},
         }
+        # Long "thinking" makes the model stream seconds of SILENCE mid-sentence, so thinking is turned right down.
+        # The two live models take different settings: gemini-3.8-live REJECTS thinkingLevel (closes with 1007).
+        th = os.environ.get("LIVE_THINKING", "auto")
+        if th == "auto":
+            th = "minimal" if "3.1" in model else "0"
+        if th == "minimal":
+            cfg["generationConfig"]["thinkingConfig"] = {"thinkingLevel": "minimal"}
+        elif th == "0":
+            cfg["generationConfig"]["thinkingConfig"] = {"thinkingBudget": 0}
+        if os.environ.get("LIVE_COMPRESSION", "0") == "1":
+            cfg["contextWindowCompression"] = {"slidingWindow": {}}   # experimental: keep long sessions from piling up context
         if with_vad:
             cfg["realtimeInputConfig"] = {"automaticActivityDetection": {
-                "startOfSpeechSensitivity": "START_SENSITIVITY_" + VAD_START,
+                "startOfSpeechSensitivity": "START_SENSITIVITY_" + (VAD_START or ("HIGH" if self.headphones else "LOW")),
                 "endOfSpeechSensitivity": "END_SENSITIVITY_HIGH",
                 "prefixPaddingMs": VAD_PREFIX_MS, "silenceDurationMs": VAD_SILENCE_MS}}
         return {"setup": cfg}
 
     async def _connect(self):
         key = os.environ.get("GEMINI_API_KEY", "")
-        models = [os.environ.get("GEMINI_LIVE_MODEL", "gemini-3.8-live"), "gemini-3.1-flash-live-preview"]
+        primary = os.environ.get("GEMINI_LIVE_MODEL", "gemini-3.1-flash-live-preview")
+        models = [primary] + [m for m in ("gemini-3.8-live", "gemini-3.1-flash-live-preview") if m != primary]
         last = ""
         for model in models:
             for with_vad in (True, False):
@@ -296,6 +308,8 @@ class LiveCall:
                         first = json.loads(await asyncio.wait_for(g.recv(), 15))
                         if "setupComplete" in first:
                             self.model = model
+                            if model != primary:
+                                print(f"[call] WARNING primary live model {primary} was unavailable ({last[:100]}); using {model}", flush=True)
                             return g
                         last = str(first)[:200]
                         await g.close()
@@ -727,6 +741,7 @@ async def handle_call(ws: WebSocket, agent: Agent, debug: bool, ip: Optional[str
     try:
         call = LiveCall(ws, agent, lang, debug)
         call.save_audio = save_audio
+        call.headphones = ws.query_params.get("hp") == "1"
         await call.run()
     finally:
         _active_by_ip[ip] -= 1
