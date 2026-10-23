@@ -1,0 +1,26 @@
+{
+ "id": "b38095cb",
+ "started_utc": "2026-10-23 19:43:02",
+ "seconds": 7.1,
+ "reason": "caller_pressed_hang_up",
+ "model": "gemini-3.8-live",
+ "lang": "ka",
+ "tools": 0,
+ "tokens": 3067,
+ "mic": {
+  "frames": 173,
+  "peak": 0.75,
+  "loud_pct": 11
+ },
+ "trail": [
+  {
+   "t": 1.1,
+   "what": "interrupted"
+  },
+  {
+   "t": 2.6,
+   "what": "caller",
+   "text": "გამარჯობა."
+  }
+ ]
+}
