@@ -160,7 +160,7 @@ async function start() {
   $('call').disabled = false;
 }
 function onEvent(e) {
-  if (e.type !== 'ai' && e.type !== 'user') dlog('event:' + e.type, e.latency_ms ? { latency_ms: e.latency_ms } : {});
+  if (e.type !== 'ai' && e.type !== 'user') dlog('event:' + e.type, e.type === 'tool' ? { name: e.name, result: e.result } : e.type === 'error' ? { text: e.text } : e.latency_ms ? { latency_ms: e.latency_ms } : {});
   if (e.type === 'ready') { $('call').textContent = 'Hang up'; $('call').classList.add('live'); $('mute').disabled = false; state('<b>Connected</b> · voice ' + e.voice + ' · talk any time'); }
   else if (e.type === 'user') { if (!userEl || userEl.dataset.done) { userEl = add('me', ''); aiEl = null; aiText = ''; } if (e.unclear) { userEl.title = 'live model transcript: ' + e.text; const fresh = better.text && (performance.now() - better.t) < 9000; userEl.textContent = fresh ? better.text : '(transcript unclear)'; userEl.dataset.unclear = fresh ? '' : '1'; userEl.classList.add('cut'); } else { userEl.classList.remove('cut'); userEl.textContent = e.text; } state('<b>Listening…</b>'); }
   else if (e.type === 'heard2') { better = { text: e.text, t: performance.now() }; const last = [...document.querySelectorAll('.msg.me')].pop(); if (last && last.dataset.unclear === '1') { last.textContent = e.text; last.dataset.unclear = ''; } }
