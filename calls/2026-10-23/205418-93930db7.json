@@ -1,0 +1,22 @@
+{
+ "id": "93930db7",
+ "started_utc": "2026-10-23 20:54:18",
+ "seconds": 12.1,
+ "reason": "caller_pressed_hang_up",
+ "model": "gemini-3.8-live",
+ "lang": "ka",
+ "tools": 0,
+ "tokens": 3519,
+ "mic": {
+  "frames": 0,
+  "peak": 0.0,
+  "loud_pct": 0
+ },
+ "trail": [
+  {
+   "t": 12.0,
+   "what": "assistant",
+   "text": "გამარჯობა, ნიმუშის ბარბერშოპში გისმენთ. რით შემიძლია დაგეხმაროთ?"
+  }
+ ]
+}
