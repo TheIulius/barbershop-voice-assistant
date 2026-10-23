@@ -1,0 +1,49 @@
+{
+ "id": "bdd66e48",
+ "started_utc": "2026-10-23 20:03:27",
+ "seconds": 49.6,
+ "reason": "caller_pressed_hang_up",
+ "model": "gemini-3.8-live",
+ "lang": "ka",
+ "tools": 0,
+ "tokens": 4895,
+ "mic": {
+  "frames": 1239,
+  "peak": 0.42,
+  "loud_pct": 10
+ },
+ "trail": [
+  {
+   "t": 14.1,
+   "what": "assistant",
+   "text": "გამარჯობა, ნიმუშის ბარბერშოპში გისმენთ. რით შემიძლია დაგეხმაროთ?"
+  },
+  {
+   "t": 29.7,
+   "what": "still_there_prompt",
+   "n": 1
+  },
+  {
+   "t": 38.3,
+   "what": "interrupted"
+  },
+  {
+   "t": 40.0,
+   "what": "caller",
+   "text": "actuar"
+  },
+  {
+   "t": 44.1,
+   "what": "interrupted"
+  },
+  {
+   "t": 45.2,
+   "what": "caller",
+   "text": "mar"
+  },
+  {
+   "t": 48.1,
+   "what": "interrupted"
+  }
+ ]
+}
