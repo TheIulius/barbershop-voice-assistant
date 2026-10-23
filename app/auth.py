@@ -35,7 +35,7 @@ GLOBAL_LOCK_SECONDS = 5 * 60
 
 PUBLIC_PATHS = {"/login", "/healthz"}
 # In public mode these developer/test routes do not exist at all (they would only burn your tokens).
-PUBLIC_BLOCKED = ("/classic", "/lab", "/api/lab", "/record", "/api/record", "/api/start", "/api/chat", "/api/stt", "/api/tts")
+PUBLIC_BLOCKED = ("/classic", "/lab", "/api/lab", "/api/start", "/api/chat", "/api/stt", "/api/tts")
 
 CSP = ("default-src 'self'; script-src 'self' 'unsafe-inline' blob:; style-src 'self' 'unsafe-inline'; "
        "connect-src 'self' ws: wss:; img-src 'self' data:; media-src 'self' blob:; worker-src 'self' blob:; "

@@ -38,8 +38,8 @@ def login(client, pw=PASSWORD):
     return client.post("/login", json={"password": pw})
 
 
-PROTECTED_GET = ["/api/calls", "/api/archive", "/", "/classic", "/lab", "/api/health", "/api/bookings", "/api/config", "/api/lab/options", "/docs", "/openapi.json", "/static/live.html"]
-PROTECTED_POST = ["/api/archive/check", "/api/start", "/api/chat", "/api/stt", "/api/tts", "/api/lab/tts", "/logout-not-a-route"]
+PROTECTED_GET = ["/api/calls", "/api/archive", "/record", "/api/record/list", "/api/record/audio/0", "/", "/classic", "/lab", "/api/health", "/api/bookings", "/api/config", "/api/lab/options", "/docs", "/openapi.json", "/static/live.html"]
+PROTECTED_POST = ["/api/archive/check", "/api/record/0", "/api/start", "/api/chat", "/api/stt", "/api/tts", "/api/lab/tts", "/logout-not-a-route"]
 
 
 @pytest.mark.parametrize("path", PROTECTED_GET)
@@ -112,9 +112,9 @@ def test_cookie_signed_with_another_secret_is_rejected(client):
 
 def test_developer_routes_do_not_exist_in_public_mode_even_when_logged_in(client):
     login(client)
-    for path in ("/classic", "/lab", "/api/lab/options", "/record", "/api/record/list", "/api/record/audio/0"):
+    for path in ("/classic", "/lab", "/api/lab/options"):
         assert client.get(path).status_code == 404
-    for path in ("/api/start", "/api/chat", "/api/stt", "/api/tts", "/api/lab/tts", "/api/record/0"):
+    for path in ("/api/start", "/api/chat", "/api/stt", "/api/tts", "/api/lab/tts"):
         assert client.post(path, json={}).status_code == 404
 
 
@@ -210,3 +210,11 @@ def test_call_log_endpoint_needs_login_then_returns_list(client):
     login(client)
     r = client.get("/api/calls")
     assert r.status_code == 200 and isinstance(r.json(), list)
+
+
+def test_recorder_page_needs_login_and_then_works_on_the_site(client):
+    assert client.get("/record").status_code in (303, 401)
+    login(client)
+    assert client.get("/record").status_code == 200
+    j = client.get("/api/record/list").json()
+    assert len(j["phrases"]) == 15 and "not configured" in j["note"]       # no GitHub token in the test environment

@@ -19,6 +19,7 @@
 <body><main>
   <h1>ხმის ჩაწერა ტესტისთვის</h1>
   <div class="sub">თითოეული ფრაზა წაიკითხე ისე, როგორც ტელეფონზე ილაპარაკებდი: დააჭირე <b>ჩაწერა</b>, თქვი ფრაზა და დააჭირე <b>გაჩერება</b>. ჩანაწერები რჩება მხოლოდ ამ კომპიუტერში, პროექტის საქაღალდეში.</div>
+  <div id="note" class="sub" style="color:var(--bad)"></div>
   <div class="bar"><div id="lvl"></div></div>
   <div id="list"></div>
 <script>
@@ -43,6 +44,7 @@ function wav(parts) {
 }
 async function load() {
   const j = await (await fetch('/api/record/list')).json();
+  $('note').textContent = j.note || '';
   $('list').innerHTML = '';
   j.phrases.forEach(p => {
     const r = document.createElement('div'); r.className = 'row'; r.id = 'r' + p.i;
@@ -58,8 +60,8 @@ async function toggle(i) {
     recIdx = -1; b.textContent = 'ვინახავ…'; b.className = '';
     const blob = wav(chunks); chunks = [];
     const r = await fetch('/api/record/' + i, { method: 'POST', headers: { 'Content-Type': 'audio/wav' }, body: blob });
-    if (r.ok) { $('s' + i).textContent = '✓ ' + (await r.json()).seconds + ' წმ'; $('p' + i).disabled = false; b.textContent = 'ხელახლა'; b.className = 'rec'; }
-    else { b.textContent = 'შეცდომა ' + r.status; }
+    if (r.ok) { const jj = await r.json(); $('s' + i).textContent = '✓ ' + jj.seconds + ' წმ · ' + jj.where; $('p' + i).disabled = false; b.textContent = 'ხელახლა'; b.className = 'rec'; }
+    else { let m = r.status; try { m = (await r.json()).detail; } catch (e) {} b.textContent = 'ხელახლა'; b.className = 'rec'; $('s' + i).textContent = '⚠ ' + m; }
     return;
   }
   if (recIdx >= 0) return;

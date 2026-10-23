@@ -170,3 +170,48 @@ def check() -> dict:
         return {"ok": True, "repo": repo, "branch": branch, "permissions": perms, "message": "branch exists or was just created"}
     except Exception as e:
         return {"ok": False, "problem": str(e)[:300]}
+
+
+# ---- generic files on the same branch (used by the voice recorder) -------------------------------------------------
+def put_file(path: str, content: bytes, message: str) -> None:
+    """Create or overwrite one file on the data branch. Raises RuntimeError with GitHub's reason on failure."""
+    token, repo, branch = _cfg()
+    if not enabled():
+        raise RuntimeError("GitHub saving is not configured on the server (ARCHIVE_REPO / ARCHIVE_GITHUB_TOKEN)")
+    h = _headers(token)
+    with _lock:
+        _ensure_branch(token, repo, branch)
+    sha = None
+    cur = requests.get(f"{API}/repos/{repo}/contents/{path}", headers=h, params={"ref": branch}, timeout=20)
+    if cur.status_code == 200:
+        sha = cur.json().get("sha")
+    elif cur.status_code != 404:
+        raise RuntimeError(f"cannot check existing file: {_why(cur)}")
+    body = {"message": message, "content": base64.b64encode(content).decode(), "branch": branch}
+    if sha:
+        body["sha"] = sha
+    r = requests.put(f"{API}/repos/{repo}/contents/{path}", headers=h, json=body, timeout=30)
+    if r.status_code not in (200, 201):
+        raise RuntimeError(f"cannot write file: {_why(r)}")
+
+
+def list_dir(path: str) -> list:
+    """File names inside a folder on the data branch ([] if the folder or branch does not exist yet)."""
+    token, repo, branch = _cfg()
+    if not enabled():
+        return []
+    r = requests.get(f"{API}/repos/{repo}/contents/{path}", headers=_headers(token), params={"ref": branch}, timeout=20)
+    if r.status_code == 404:
+        return []
+    if r.status_code != 200:
+        raise RuntimeError(f"cannot list folder: {_why(r)}")
+    return [x["name"] for x in r.json() if x.get("type") == "file"]
+
+
+def get_file(path: str) -> Optional[bytes]:
+    token, repo, branch = _cfg()
+    if not enabled():
+        return None
+    h = {**_headers(token), "Accept": "application/vnd.github.raw+json"}
+    r = requests.get(f"{API}/repos/{repo}/contents/{path}", headers=h, params={"ref": branch}, timeout=30)
+    return r.content if r.status_code == 200 else None

@@ -1,13 +1,23 @@
-"""Local-only voice recorder for benchmarks: you read a list of phrases, each recording is saved as a 16 kHz WAV in
-data/voice_samples/ (git-ignored, never uploaded by this code). Disabled in PUBLIC_MODE and for non-local clients."""
+"""Voice recorder for benchmarks: you read a list of phrases, each recording is a 16 kHz mono WAV.
+
+Two modes:
+  * local (your computer): saved to data/voice_samples/ (git-ignored); only reachable from this computer;
+  * PUBLIC_MODE (the password-protected site): saved to the GitHub data branch (voice_samples/NN.wav) through the same
+    token as the call records, because the host's disk is wiped on every restart. The login gate still applies.
+"""
 from __future__ import annotations
 
 import os
+import time
 import wave
+from collections import deque
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, Response
+
+from . import archive
 
 router = APIRouter()
 ROOT = Path(__file__).resolve().parent.parent
@@ -23,9 +33,18 @@ PHRASES = [  # (category, text, digits_if_a_number)
 ]
 
 
+_saves = deque(maxlen=200)
+REMOTE_DIR = "voice_samples"
+
+
+def _public() -> bool:
+    return os.environ.get("PUBLIC_MODE", "0") == "1"
+
+
 def _local_only(request: Request) -> None:
-    if os.environ.get("PUBLIC_MODE", "0") == "1":
-        raise HTTPException(404)
+    """Local mode: only this computer. Public mode: the login middleware already protects every route."""
+    if _public():
+        return
     host = request.client.host if request.client else ""
     if host not in ("127.0.0.1", "::1", "localhost", "testclient"):
         raise HTTPException(403, "the recorder only works on the computer that runs the server")
@@ -40,8 +59,18 @@ def page(request: Request):
 @router.get("/api/record/list")
 def listing(request: Request):
     _local_only(request)
-    saved = {int(p.stem) for p in SAMPLES.glob("*.wav")} if SAMPLES.exists() else set()
-    return {"phrases": [{"i": i, "category": c, "text": t, "saved": i in saved} for i, (c, t, _) in enumerate(PHRASES)]}
+    note = ""
+    if _public():
+        if not archive.enabled():
+            saved, note = set(), "Saving is not configured on the server (ARCHIVE_REPO / ARCHIVE_GITHUB_TOKEN), so recordings cannot be kept."
+        else:
+            try:
+                saved = {int(n[:-4]) for n in archive.list_dir(REMOTE_DIR) if n.endswith(".wav") and n[:-4].isdigit()}
+            except Exception as e:
+                saved, note = set(), f"Could not read the saved recordings: {e}"
+    else:
+        saved = {int(p.stem) for p in SAMPLES.glob("*.wav")} if SAMPLES.exists() else set()
+    return {"note": note, "phrases": [{"i": i, "category": c, "text": t, "saved": i in saved} for i, (c, t, _) in enumerate(PHRASES)]}
 
 
 @router.post("/api/record/{idx}")
@@ -52,25 +81,44 @@ async def save(idx: int, request: Request):
     data = await request.body()
     if not (3000 < len(data) < 3_000_000):
         raise HTTPException(413, "recording too short or too long")
-    SAMPLES.mkdir(parents=True, exist_ok=True)
-    f = SAMPLES / f"{idx:02d}.wav"
-    f.write_bytes(data)
+    import io
     try:
-        with wave.open(str(f), "rb") as w:
+        with wave.open(io.BytesIO(data), "rb") as w:
             ok = w.getnchannels() == 1 and w.getframerate() == 16000 and w.getsampwidth() == 2
             secs = w.getnframes() / 16000
-    except wave.Error:
+    except (wave.Error, EOFError):
         ok, secs = False, 0
-    if not ok:
-        f.unlink()
-        raise HTTPException(415, "expected 16 kHz mono 16-bit WAV")
-    return {"saved": idx, "seconds": round(secs, 1)}
+    if not ok or secs > 60:
+        raise HTTPException(415, "expected a 16 kHz mono 16-bit WAV of at most 60 s")
+    if _public():
+        now = time.time()
+        while _saves and _saves[0] < now - 3600:
+            _saves.popleft()
+        if len(_saves) >= 60:
+            raise HTTPException(429, "too many recordings this hour")
+        _saves.append(now)
+        try:
+            await run_in_threadpool(archive.put_file, f"{REMOTE_DIR}/{idx:02d}.wav", data, f"voice sample {idx:02d}: {PHRASES[idx][1][:40]}")
+        except Exception as e:
+            print(f"[recorder] could not save sample {idx}: {e}", flush=True)
+            raise HTTPException(502, f"could not save to GitHub: {str(e)[:200]}")
+    else:
+        SAMPLES.mkdir(parents=True, exist_ok=True)
+        (SAMPLES / f"{idx:02d}.wav").write_bytes(data)
+    return {"saved": idx, "seconds": round(secs, 1), "where": "github data branch" if _public() else "this computer"}
 
 
 @router.get("/api/record/audio/{idx}")
 def audio(idx: int, request: Request):
     _local_only(request)
+    if not (0 <= idx < len(PHRASES)):
+        raise HTTPException(404)
+    if _public():
+        blob = archive.get_file(f"{REMOTE_DIR}/{idx:02d}.wav")
+        if not blob:
+            raise HTTPException(404)
+        return Response(blob, media_type="audio/wav")
     f = SAMPLES / f"{idx:02d}.wav"
-    if not (0 <= idx < len(PHRASES)) or not f.exists():
+    if not f.exists():
         raise HTTPException(404)
     return Response(f.read_bytes(), media_type="audio/wav")
