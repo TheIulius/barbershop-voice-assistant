@@ -52,7 +52,7 @@ NEG = {"no", "nope", "wrong", "incorrect", "cancel", "not", "нет", "неве�
        "არა", "არასწორია", "გაუქმება", "არ"}
 
 VOICE = os.environ.get("GEMINI_VOICE", "Kore")
-VAD_START = os.environ.get("VAD_START", "")                     # "" = automatic: HIGH with headphones (catches short/quiet words), LOW without (speaker echo must not interrupt)
+VAD_START = os.environ.get("VAD_START", "HIGH")                 # HIGH catches short / quiet words; the call page already keeps speaker echo out (mic muted while the assistant talks)
 VAD_PREFIX_MS = int(os.environ.get("VAD_PREFIX_MS", 400))       # audio kept from before speech was detected
 VAD_SILENCE_MS = int(os.environ.get("VAD_SILENCE_MS", 700))     # quiet needed before the caller's turn is over
 UNCLEAR_STYLE = os.environ.get("UNCLEAR_STYLE", "new")          # "new" = best guess + confirm ; "old" = just ask to repeat
@@ -167,10 +167,22 @@ _NEW_UNCLEAR = """- Audio can be unclear, short or noisy. Never answer in any ot
 - HOW TO HANDLE UNCLEAR ANSWERS (very important): callers often answer with just one or two words. Treat a short answer as the answer to the question you JUST asked. When you ask a question that has a few possible answers (which barber, which service, which day, yes or no), say the options out loud ("Giorgi or Nika?") so a short answer is easy to match. If what you heard is not clear but one of the options is plausible, do NOT say you did not understand: confirm your best guess with a short yes-or-no question in {L} ("Did you say Giorgi?"). For names, phone numbers and times never guess: ask once to repeat, then ask them to say it slowly, syllable by syllable or digit by digit. Only if there is truly no plausible guess, ask them to repeat, and never say the same sentence twice in a row: the second time offer the options or ask for a full sentence, and the third time offer a callback with request_callback."""
 
 
+_SHORT_REPLIES = """
+- SHORT REPLIES AND SMALL TALK (very common, always understand them): a caller often answers with two or three everyday words, and these are NEVER a reason to say you did not understand.
+  * Agreement / OK: "კარგი", "კარგია", "ეგრე იყოს", "ხო", "დიახ", "კი", "ოკ", "აჰა", "მესმის", "გასაგებია", "რა თქმა უნდა"; (Russian "ладно", "хорошо", "давайте"; English "okay", "sure", "sounds good") = yes / fine to your last statement or question: carry on with the next step.
+  * Wait / thinking: "დაიცა", "დაიცა რა", "მოიცადე", "ერთი წუთით", "წამით", "ჰმ", "აა", "ვფიქრობ"; (Russian "подожди", "секунду"; English "wait", "hold on", "hmm") = they need a moment: say only a tiny "კარგი, გელოდებით." (or the same in their language) and wait quietly.
+  * No: "არა", "არ მინდა", "არაუშავს", "არა, მადლობა"; (Russian "нет"; English "no") = no / never mind.
+  * Did not catch you: "რა?", "რას ამბობთ?", "ისევ?", "ხომ?"; (Russian "что?"; English "what?") = repeat your last sentence, shorter and in other words.
+  * Thanks / goodbye: "მადლობა", "გმადლობთ", "ნახვამდის", "კარგად" = answer briefly and, if the call is finished, say goodbye and end the call.
+  If a very short utterance is unclear, ASSUME it is one of these small replies and calmly continue by repeating your last question in a few words ("ანუ, გიორგი თუ ნიკა?"). Never answer a short utterance with a request to repeat, and never with a remark about language."""
+
+
 def build_prompt(agent: Agent, greet_lang: str, locked: bool = LOCK_LANGUAGE) -> str:
     now = agent.now()
     L = LANG_NAMES[greet_lang]
     UNCLEAR_BLOCK = (_NEW_UNCLEAR if UNCLEAR_STYLE == "new" else _OLD_UNCLEAR).format(L=L)
+    if UNCLEAR_STYLE == "new" and os.environ.get("SHORT_REPLIES", "1") == "1":
+        UNCLEAR_BLOCK += _SHORT_REPLIES
     if locked:
         lang_rules = f"""- LANGUAGE (absolute, nothing overrides it): this call is in {L} and stays in {L} from the first word to the last. Speak ONLY {L} in every reply, even if the caller speaks another language or the audio sounds like another language. Never switch language and never mix languages. Never tell the caller that you can only speak {L}. If the audio sounds like another language, assume the caller spoke {L} and you heard it badly: treat it as unclear audio (see below) and answer in {L}.
 {UNCLEAR_BLOCK}

@@ -11,12 +11,15 @@ from live_test import say_pcm
 FRAME = 1280
 SETUP = "გამარჯობა, მინდა თმის შეჭრა."
 SHORT = ["გიორგი", "ნიკა", "ხვალ", "ხუთზე", "ორშაბათს", "ნებისმიერი", "კი", "არა"]
+if os.environ.get("SET") == "backchannel":   # everyday little replies that must never be answered with "I did not understand"
+    SHORT = ["ეგრე იყოს", "კარგია", "დაიცა რა", "ხო", "აჰა", "მადლობა", "ერთი წუთით", "ოკ", "გასაგებია", "არაუშავს"]
 VOICES = ["ka-GE-EkaNeural", "ka-GE-GiorgiNeural"]
 
 
 def verdict(text: str) -> str:
     t = text or ""
-    if any(k in t for k in ("გაიმეორ", "ვერ გავიგე", "არ გამიგია", "გაიმეოროთ")): return "REPEAT"
+    if t.strip() == "" or t.startswith("აქ ხართ") or "ისევ აქ ხართ" in t: return "MISSED"   # silence or our own "are you there?" nudge = the short word was not heard at all
+    if any(k in t for k in ("გაიმეორ", "ვერ გავიგე", "არ გამიგია", "გაიმეოროთ", "ქართულად")): return "REPEAT"
     if "?" in t and any(k in t for k in ("თქვით", "გულისხმობთ", "ხომ ", "სწორია", "ანუ")): return "CONFIRM"
     return "PROCEED"
 
@@ -64,8 +67,8 @@ async def main():
     await asyncio.gather(*(run(i, w) for i, w in enumerate(SHORT)))
     out.sort(key=lambda x: SHORT.index(x[0]))
     for w, v, t in out: print(f"{v:8s} {w:12s} -> {t}")
-    c = {k: sum(1 for o in out if o[1] == k) for k in ("PROCEED", "CONFIRM", "REPEAT", "ERROR")}
-    print(f"\nSUMMARY: carried on {c['PROCEED']}, asked to confirm {c['CONFIRM']}, ASKED TO REPEAT {c['REPEAT']}, errors {c['ERROR']} (of {len(out)})")
+    c = {k: sum(1 for o in out if o[1] == k) for k in ("PROCEED", "CONFIRM", "REPEAT", "MISSED", "ERROR")}
+    print(f"\nSUMMARY: carried on {c['PROCEED']}, confirmed {c['CONFIRM']}, ASKED TO REPEAT {c['REPEAT']}, NOT HEARD AT ALL {c['MISSED']}, errors {c['ERROR']} (of {len(out)})")
 
 if __name__ == "__main__":
     asyncio.run(main())
