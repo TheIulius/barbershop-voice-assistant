@@ -21,6 +21,7 @@ from .llm import LLMError, make_llm
 from .shop import Shop
 from . import tts
 from .lab import router as lab_router
+from .recorder import router as recorder_router
 from .live import handle_call, CALL_LOG
 from . import archive
 from .auth import Auth, AuthMiddleware, make_router
@@ -61,6 +62,7 @@ auth = Auth.from_env()          # None = no password (local development only); P
 app = FastAPI(title="Barbershop voice assistant (prototype)", docs_url=None, redoc_url=None, openapi_url=None)
 app.include_router(make_router(auth, ROOT / "static" / "login.html"))
 app.include_router(lab_router)
+app.include_router(recorder_router)
 app.add_middleware(AuthMiddleware, auth=auth, public_mode=PUBLIC)
 
 @app.on_event("startup")

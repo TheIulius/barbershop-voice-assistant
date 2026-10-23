@@ -112,9 +112,9 @@ def test_cookie_signed_with_another_secret_is_rejected(client):
 
 def test_developer_routes_do_not_exist_in_public_mode_even_when_logged_in(client):
     login(client)
-    for path in ("/classic", "/lab", "/api/lab/options"):
+    for path in ("/classic", "/lab", "/api/lab/options", "/record", "/api/record/list", "/api/record/audio/0"):
         assert client.get(path).status_code == 404
-    for path in ("/api/start", "/api/chat", "/api/stt", "/api/tts", "/api/lab/tts"):
+    for path in ("/api/start", "/api/chat", "/api/stt", "/api/tts", "/api/lab/tts", "/api/record/0"):
         assert client.post(path, json={}).status_code == 404
 
 

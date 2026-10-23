@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="ka">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ხმის ჩაწერა / Voice recorder</title>
+<style>
+  :root { --bg:#f6f6f4; --card:#fff; --ink:#1c1c1a; --mute:#6b6b66; --line:#e2e2dd; --accent:#1f6f50; --bad:#b3261e; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#161615; --card:#1f1f1d; --ink:#ecece8; --mute:#9a9a94; --line:#33332f; --accent:#4cc38a; --bad:#ff8a80; } }
+  * { box-sizing: border-box; } body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.45 system-ui, sans-serif; }
+  main { max-width:720px; margin:0 auto; padding:20px 16px 60px; } h1 { font-size:20px; margin:0 0 6px; } .sub { color:var(--mute); font-size:14px; }
+  .row { display:flex; gap:10px; align-items:center; padding:12px; border:1px solid var(--line); border-radius:10px; background:var(--card); margin-top:10px; }
+  .row .t { flex:1; font-size:18px; } .row .c { font-size:12px; color:var(--mute); }
+  button { font:inherit; cursor:pointer; border:1px solid var(--line); background:var(--card); color:var(--ink); border-radius:8px; padding:8px 14px; }
+  button.rec { background:var(--accent); color:#fff; border-color:var(--accent); } button.stop { background:var(--bad); color:#fff; border-color:var(--bad); }
+  .ok { color:var(--accent); font-weight:600; } .bar { height:8px; background:var(--line); border-radius:4px; overflow:hidden; margin:14px 0; } .bar div { height:100%; width:0; background:var(--accent); }
+</style>
+</head>
+<body><main>
+  <h1>ხმის ჩაწერა ტესტისთვის</h1>
+  <div class="sub">თითოეული ფრაზა წაიკითხე ისე, როგორც ტელეფონზე ილაპარაკებდი: დააჭირე <b>ჩაწერა</b>, თქვი ფრაზა და დააჭირე <b>გაჩერება</b>. ჩანაწერები რჩება მხოლოდ ამ კომპიუტერში, პროექტის საქაღალდეში.</div>
+  <div class="bar"><div id="lvl"></div></div>
+  <div id="list"></div>
+<script>
+const $ = id => document.getElementById(id);
+let ctx = null, stream = null, node = null, chunks = [], recIdx = -1;
+const WORKLET = `class P extends AudioWorkletProcessor { process(i) { const c = i[0][0]; if (c) this.port.postMessage(c.slice(0)); return true; } } registerProcessor('p', P);`;
+async function ensureMic() {
+  if (ctx) return;
+  stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 } });
+  ctx = new AudioContext({ sampleRate: 16000 }); await ctx.resume();
+  await ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([WORKLET], { type: 'application/javascript' })));
+  node = new AudioWorkletNode(ctx, 'p'); ctx.createMediaStreamSource(stream).connect(node);
+  node.port.onmessage = e => { const a = e.data; let s = 0; for (let i = 0; i < a.length; i++) s += a[i] * a[i]; $('lvl').style.width = Math.min(100, Math.sqrt(s / a.length) * 500) + '%'; if (recIdx >= 0) chunks.push(a); };
+}
+function wav(parts) {
+  const n = parts.reduce((s, p) => s + p.length, 0), pcm = new Int16Array(n); let o = 0;
+  for (const p of parts) for (let i = 0; i < p.length; i++) pcm[o++] = Math.max(-1, Math.min(1, p[i])) * 32767;
+  const buf = new ArrayBuffer(44 + n * 2), v = new DataView(buf), w = (off, s) => [...s].forEach((c, i) => v.setUint8(off + i, c.charCodeAt(0)));
+  w(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); w(8, 'WAVEfmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, 16000, true); v.setUint32(28, 32000, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true); w(36, 'data'); v.setUint32(40, n * 2, true);
+  new Int16Array(buf, 44).set(pcm); return new Blob([buf], { type: 'audio/wav' });
+}
+async function load() {
+  const j = await (await fetch('/api/record/list')).json();
+  $('list').innerHTML = '';
+  j.phrases.forEach(p => {
+    const r = document.createElement('div'); r.className = 'row'; r.id = 'r' + p.i;
+    r.innerHTML = `<div class="t">${p.text}<div class="c">${p.category}</div></div><span class="ok" id="s${p.i}">${p.saved ? '✓' : ''}</span><button class="rec" id="b${p.i}">ჩაწერა</button><button id="p${p.i}" ${p.saved ? '' : 'disabled'}>მოსმენა</button>`;
+    $('list').appendChild(r);
+    $('b' + p.i).onclick = () => toggle(p.i);
+    $('p' + p.i).onclick = () => new Audio('/api/record/audio/' + p.i + '?t=' + Date.now()).play();
+  });
+}
+async function toggle(i) {
+  const b = $('b' + i);
+  if (recIdx === i) {                       // stop and save
+    recIdx = -1; b.textContent = 'ვინახავ…'; b.className = '';
+    const blob = wav(chunks); chunks = [];
+    const r = await fetch('/api/record/' + i, { method: 'POST', headers: { 'Content-Type': 'audio/wav' }, body: blob });
+    if (r.ok) { $('s' + i).textContent = '✓ ' + (await r.json()).seconds + ' წმ'; $('p' + i).disabled = false; b.textContent = 'ხელახლა'; b.className = 'rec'; }
+    else { b.textContent = 'შეცდომა ' + r.status; }
+    return;
+  }
+  if (recIdx >= 0) return;
+  try { await ensureMic(); } catch (e) { alert('მიკროფონი ვერ ჩაირთო: ' + e.message); return; }
+  chunks = []; recIdx = i; b.textContent = 'გაჩერება'; b.className = 'stop';
+}
+load();
+</script></main></body></html>

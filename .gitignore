@@ -10,3 +10,4 @@ data/callbacks.jsonl
 data/tts_cache/
 data/debug_audio/
 DEPLOY_SECRETS.local.txt
+data/voice_samples/
