@@ -52,6 +52,10 @@ NEG = {"no", "nope", "wrong", "incorrect", "cancel", "not", "нет", "неве�
        "არა", "არასწორია", "გაუქმება", "არ"}
 
 VOICE = os.environ.get("GEMINI_VOICE", "Kore")
+VAD_START = os.environ.get("VAD_START", "HIGH")                 # START_SENSITIVITY_<HIGH|LOW>: HIGH catches short/quiet words
+VAD_PREFIX_MS = int(os.environ.get("VAD_PREFIX_MS", 400))       # audio kept from before speech was detected
+VAD_SILENCE_MS = int(os.environ.get("VAD_SILENCE_MS", 700))     # quiet needed before the caller's turn is over
+UNCLEAR_STYLE = os.environ.get("UNCLEAR_STYLE", "new")          # "new" = best guess + confirm ; "old" = just ask to repeat
 NAME_POLICY = os.environ.get("NAME_POLICY", "new")             # "old" only for A/B testing
 LOCK_LANGUAGE = os.environ.get("LOCK_LANGUAGE", "1") == "1"   # one language per call, no switching
 LANG_CODE = {"ka": "ka-GE", "ru": "ru-RU", "en": "en-US"}
@@ -158,12 +162,18 @@ NAME_RULES = """- NAMES: ask only for the caller's FIRST NAME for the booking, p
 - Always write names in the script of the call language (Georgian letters in a Georgian call, Cyrillic in a Russian call, Latin in an English call). Never transliterate a Georgian name into Latin letters in a Georgian call."""
 
 
+_OLD_UNCLEAR = """- Audio can be unclear, short or noisy. If you cannot understand it, say in {L} a short "Sorry, I didn't catch that, could you repeat?". Never answer in any other language and never guess what was said."""
+_NEW_UNCLEAR = """- Audio can be unclear, short or noisy. Never answer in any other language.
+- HOW TO HANDLE UNCLEAR ANSWERS (very important): callers often answer with just one or two words. Treat a short answer as the answer to the question you JUST asked. When you ask a question that has a few possible answers (which barber, which service, which day, yes or no), say the options out loud ("Giorgi or Nika?") so a short answer is easy to match. If what you heard is not clear but one of the options is plausible, do NOT say you did not understand: confirm your best guess with a short yes-or-no question in {L} ("Did you say Giorgi?"). For names, phone numbers and times never guess: ask once to repeat, then ask them to say it slowly, syllable by syllable or digit by digit. Only if there is truly no plausible guess, ask them to repeat, and never say the same sentence twice in a row: the second time offer the options or ask for a full sentence, and the third time offer a callback with request_callback."""
+
+
 def build_prompt(agent: Agent, greet_lang: str, locked: bool = LOCK_LANGUAGE) -> str:
     now = agent.now()
     L = LANG_NAMES[greet_lang]
+    UNCLEAR_BLOCK = (_NEW_UNCLEAR if UNCLEAR_STYLE == "new" else _OLD_UNCLEAR).format(L=L)
     if locked:
-        lang_rules = f"""- LANGUAGE (absolute, nothing overrides it): this call is in {L} and stays in {L} from the first word to the last. Speak ONLY {L} in every reply, even if the caller speaks another language or the audio sounds like another language. Never switch language and never mix languages. Only if the caller clearly speaks a long sentence (five words or more) in another language, answer in {L} and say once that on this call you can only help in {L}. For short or unclear audio never say that: just ask them to repeat in {L}.
-- Audio can be unclear, short or noisy. If you cannot understand it, say in {L} a short \"Sorry, I didn't catch that, could you repeat?\". Never answer in any other language and never guess what was said.
+        lang_rules = f"""- LANGUAGE (absolute, nothing overrides it): this call is in {L} and stays in {L} from the first word to the last. Speak ONLY {L} in every reply, even if the caller speaks another language or the audio sounds like another language. Never switch language and never mix languages. Never tell the caller that you can only speak {L}. If the audio sounds like another language, assume the caller spoke {L} and you heard it badly: treat it as unclear audio (see below) and answer in {L}.
+{UNCLEAR_BLOCK}
 - Never greet again after your first greeting. If you did not understand, ask them to repeat; do not start over."""
     else:
         lang_rules = None
@@ -262,14 +272,15 @@ class LiveCall:
                                                   **({"languageCode": LANG_CODE[self.lang0]} if LOCK_LANGUAGE else {})}},
             "systemInstruction": {"parts": [{"text": build_prompt(self.agent, self.lang0)}]},
             "tools": TOOLS,
+            "contextWindowCompression": {"slidingWindow": {}},   # keeps long calls healthy instead of piling up context
             "inputAudioTranscription": {},
             "outputAudioTranscription": {},
         }
         if with_vad:
             cfg["realtimeInputConfig"] = {"automaticActivityDetection": {
-                "startOfSpeechSensitivity": "START_SENSITIVITY_LOW",
+                "startOfSpeechSensitivity": "START_SENSITIVITY_" + VAD_START,
                 "endOfSpeechSensitivity": "END_SENSITIVITY_HIGH",
-                "prefixPaddingMs": 300, "silenceDurationMs": 700}}
+                "prefixPaddingMs": VAD_PREFIX_MS, "silenceDurationMs": VAD_SILENCE_MS}}
         return {"setup": cfg}
 
     async def _connect(self):

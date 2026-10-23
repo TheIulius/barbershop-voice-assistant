@@ -48,6 +48,7 @@
     <div id="state"></div>
     <div class="row sub" style="margin-top:10px">
       <label><input type="checkbox" id="hp"> I'm wearing headphones (lets you interrupt freely)</label>
+      <label title="Experimental. Off by default: it can cut quiet speech."><input type="checkbox" id="ng"> noisy-room mode (experimental)</label>
       <button id="dbgcopy" style="padding:2px 8px;font-size:12px">copy debug info</button>
     </div>
     <div class="row sub" id="dbg" style="margin-top:6px">
@@ -107,23 +108,27 @@ registerProcessor('pcm', Pcm);`;
 // ---- one 40 ms microphone frame: level meter, speaker-mode protection, and a noise gate for noisy rooms
 const SILENCE = new ArrayBuffer(1280);
 let floorEst = 0.004, gateOpen = true, hang = 0, preroll = [], recent = [];
+// Playing = audio is still scheduled ahead of the audio clock. Do not rely on 'ended' events (they can be missed).
+function isPlaying() { return !!outCtx && (nextT - outCtx.currentTime) > 0.05; }
 function processMicFrame(pcm, rms) {
   $('level').style.width = Math.min(100, rms * 500) + '%';
   if (!(ws && ws.readyState === 1) || muted) return;
   // Speaker mode (no headphones): while the assistant is talking, only let real, loud speech through, so its own
   // voice leaking into the microphone cannot make Gemini think you interrupted.
   let allowed = true;
-  if (sources.length && !$('hp').checked) {
+  if (playingNow && !isPlaying()) { setPlaying(false); sources = []; }   // missed 'ended' events must never leave us stuck in speaker mode
+  if (isPlaying() && !$('hp').checked) {
     loudRun = rms > 0.05 ? loudRun + 1 : 0;
     if (loudRun >= 4) { if (!bargeOpen) dlog('barge-in opened', { rms: +rms.toFixed(3) }); bargeOpen = true; }
     allowed = bargeOpen;
-  } else { loudRun = 0; if (!sources.length) bargeOpen = false; }
+  } else { loudRun = 0; if (!isPlaying()) bargeOpen = false; }
   if (!allowed) { ws.send(SILENCE); return; }
-  // Noise gate, only in a noisy room: constant background noise confuses Gemini's speech detection (it never decides you
-  // have stopped talking). We track the room's noise level; if it is high, frames at noise level are replaced by silence,
-  // and the 320 ms before speech starts are sent too so the first word is not clipped.
-  recent.push(rms); if (recent.length > 100) recent.shift();           // the quietest 20% of the last 4 s = the room's noise level
-  if (recent.length >= 25) { const s = [...recent].sort((a, b) => a - b); floorEst = s[Math.floor(s.length * 0.2)]; }
+  // Optional noise gate ("noisy-room mode", off by default). The noise level is estimated from the QUIETEST 10% of the last
+  // 10 s, so even long continuous speech does not raise it; frames at noise level are replaced by silence, and the 320 ms
+  // before speech are sent too so the first word is not clipped.
+  if (!$('ng').checked) { gateOpen = true; preroll = []; ws.send(pcm); return; }
+  recent.push(rms); if (recent.length > 250) recent.shift();
+  if (recent.length >= 100) { const s = [...recent].sort((a, b) => a - b); floorEst = s[Math.floor(s.length * 0.1)]; }
   if (floorEst > 0.012) {
     const thr = floorEst * 2 + 0.008;
     preroll.push(pcm); if (preroll.length > 8) preroll.shift();
