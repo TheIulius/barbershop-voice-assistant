@@ -1,0 +1,22 @@
+{
+ "id": "490895a1",
+ "started_utc": "2026-10-23 20:56:51",
+ "seconds": 5.5,
+ "reason": "caller_pressed_hang_up",
+ "model": "gemini-3.1-flash-live-preview",
+ "lang": "ka",
+ "tools": 0,
+ "tokens": 3212,
+ "mic": {
+  "frames": 0,
+  "peak": 0.0,
+  "loud_pct": 0
+ },
+ "trail": [
+  {
+   "t": 5.5,
+   "what": "assistant",
+   "text": "გამარჯობა, ნიმუშის ბარბერშოპი გისმენთ. რით შემიძლია დაგეხმაროთ?"
+  }
+ ]
+}
