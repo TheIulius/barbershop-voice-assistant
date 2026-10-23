@@ -5,6 +5,7 @@ import time
 
 import pytest
 
+from app import live
 from app.live import LiveCall
 from app.agent import Agent
 from app.actions import Actions
@@ -85,11 +86,11 @@ def test_no_nudge_when_it_is_not_the_callers_turn(call):
 def test_caller_silence_gets_gentle_prompt_then_hangup(call):
     g = FakeG()
     call.waiting_for_caller = True
-    call.last_activity = call.last_voice_at = time.time() - 11
+    call.last_activity = call.last_voice_at = time.time() - (live.SILENCE_NUDGE_S + 1)
     asyncio.run(run_watchdog(call, g, 1.5))
     assert any("still there" in t for t in texts(g))
     call.nudges = 2
-    call.last_activity = call.last_voice_at = time.time() - 11
+    call.last_activity = call.last_voice_at = time.time() - (live.SILENCE_NUDGE_S + 1)
     assert asyncio.run(run_watchdog(call, g, 1.5))
     assert any(e["type"] == "hangup" for e in call.ws.events)
     assert call.end_reason == "caller_silent_after_2_prompts"
@@ -111,38 +112,36 @@ def test_unexpected_google_disconnect_is_reported(call):
     assert any(e["type"] == "error" and "1011" in e["text"] for e in call.ws.events)
 
 
-def test_sound_from_the_caller_counts_as_presence_no_hangup(call):
+def test_noise_is_not_presence_a_noisy_room_still_gets_the_question_after_a_long_pause(call):
+    g = FakeG()
+    call.waiting_for_caller = True
+    call.loud.extend([True] * 200)                        # constant noise, no recognised words
+    call.last_voice_at = time.time()                      # sound is arriving right now
+    call.last_activity = time.time() - (live.SILENCE_NUDGE_S + 1)
+    assert not asyncio.run(run_watchdog(call, g, 1.5))    # first: a question, not a hang-up
+    sent = texts(g)
+    assert len(sent) == 1 and "still there" in sent[0] and "trouble hearing" in sent[0]
+    assert "quieter" not in sent[0]                        # the first question does not blame the caller
+
+
+def test_short_pause_is_not_a_long_pause(call):
+    g = FakeG()
+    call.waiting_for_caller = True
+    call.last_activity = time.time() - (live.SILENCE_NUDGE_S - 6)
+    assert not asyncio.run(run_watchdog(call, g, 1.5))
+    assert texts(g) == []
+
+
+def test_noisy_room_ends_with_a_clear_message_after_two_questions(call):
     g = FakeG()
     call.waiting_for_caller = True
     call.nudges = 2
-    call.last_activity = time.time() - 60
-    call.last_voice_at = time.time()          # the caller is making sound right now
-    assert not asyncio.run(run_watchdog(call, g, 1.5))
-    assert texts(g) == [] and not any(e["type"] == "hangup" for e in call.ws.events)
-
-
-def test_noisy_line_gets_a_quieter_spot_request_not_a_hangup(call):
-    g = FakeG()
-    call.waiting_for_caller = True
-    call.loud.extend([True] * 200)             # loud audio the whole time, but no words recognised
-    call.last_user_text_at = time.time() - 20
-    call.last_activity = time.time() - 60
-    assert not asyncio.run(run_watchdog(call, g, 1.5))
-    assert any("background noise" in t for t in texts(g))
-    assert not any("still there" in t for t in texts(g))
-    assert not any(e["type"] == "hangup" for e in call.ws.events)
-
-
-def test_line_that_stays_too_noisy_ends_with_a_clear_message(call):
-    g = FakeG()
-    call.waiting_for_caller = True
     call.loud.extend([True] * 200)
-    call.last_user_text_at = time.time() - 60
-    call.noise_notes = 3
-    call.last_noise_note = time.time() - 30
+    call.last_activity = time.time() - (live.SILENCE_NUDGE_S + 1)
     assert asyncio.run(run_watchdog(call, g, 1.5))
     assert any(e["type"] == "error" and "too noisy" in e["text"] for e in call.ws.events)
     assert call.end_reason == "noisy_line_no_speech_recognised"
+    assert not any(e["type"] == "hangup" for e in call.ws.events)
 
 
 def test_call_summary_records_reason_and_trail(call, capsys):
@@ -154,3 +153,32 @@ def test_call_summary_records_reason_and_trail(call, capsys):
     rec = live.CALL_LOG[-1]
     assert rec["reason"].startswith("caller_left") and rec["trail"][0]["what"] == "caller"
     assert "[calllog]" in capsys.readouterr().out
+
+
+def test_person_who_keeps_talking_is_never_asked_if_they_are_there(call):
+    """Recognised words keep arriving for a long monologue: no prompt, even in a loud room."""
+    g = FakeG()
+    call.waiting_for_caller = True
+    call.loud.extend([True] * 250)
+
+    async def scenario():
+        t = asyncio.create_task(call.watchdog(g))
+        for _ in range(8):                                 # words keep arriving every ~0.3 s
+            call.last_activity = time.time()
+            await asyncio.sleep(0.3)
+        done = t.done()
+        t.cancel()
+        return done
+    call.last_activity = time.time() - 1
+    assert not asyncio.run(scenario())
+    assert texts(g) == []
+
+
+def test_second_noisy_question_suggests_a_quieter_place(call):
+    g = FakeG()
+    call.waiting_for_caller = True
+    call.nudges = 1
+    call.loud.extend([True] * 200)
+    call.last_activity = time.time() - (live.SILENCE_NUDGE_S + 1)
+    asyncio.run(run_watchdog(call, g, 1.5))
+    assert any("quieter" in t for t in texts(g))

@@ -41,7 +41,7 @@ MAX_CONCURRENT_CALLS = int(os.environ.get("MAX_CONCURRENT_CALLS", 0))   # 0 = no
 _budget = {"day": "", "seconds": 0.0, "active": 0}
 CALL_LOG = deque(maxlen=40)                                          # recent call summaries, newest last (memory only)
 KEEP_TRANSCRIPTS = os.environ.get("KEEP_TRANSCRIPTS", "1") == "1"    # test phase: keep the words so failures can be diagnosed
-SILENCE_NUDGE_S = 10
+SILENCE_NUDGE_S = int(os.environ.get("SILENCE_NUDGE_S", 15))   # a long pause, not a short thinking break
 MAX_TOOL_CALLS = 30
 
 AFFIRM = {"yes", "yeah", "yep", "yup", "ok", "okay", "sure", "correct", "right", "confirm", "confirmed",
@@ -224,8 +224,6 @@ class LiveCall:
         self.loud = deque(maxlen=300)      # last ~12 s of 40 ms frames: was the caller's audio loud?
         self.last_voice_at = time.time()   # last time loud audio came from the caller (speech OR noise)
         self.last_user_text_at = time.time()
-        self.noise_notes = 0
-        self.last_noise_note = 0.0
         self.playing = False          # the caller's browser is still playing the assistant's audio
         self.waiting_for_caller = False   # the assistant finished a turn and it is now the caller's move
         self.pending_since = None     # when we answered a tool call and are waiting for the model to speak
@@ -581,31 +579,33 @@ class LiveCall:
             if not self.waiting_for_caller:              # mid-exchange: not the caller's silence
                 self.last_activity = now
                 continue
-            # A noisy line: lots of loud audio but no recognisable words for a while. Noise is NOT silence, so it must
-            # never trigger "are you still there?" or a hang-up; instead ask the caller to find a quieter spot.
-            loud_ratio = (sum(self.loud) / len(self.loud)) if len(self.loud) >= 100 else 0.0
-            if loud_ratio > 0.5 and now - self.last_user_text_at > 12:
-                self.last_activity = now
-                if self.noise_notes >= 3 and now - self.last_noise_note > 20:
-                    await self.emit(type="error", text="The line is too noisy for me to understand. Please call again from a quieter place.")
-                    self.end_reason = self.end_reason or "noisy_line_no_speech_recognised"
+            # The caller's "presence" is recognised words / a model reply, NOT raw sound: a TV or a busy street must not
+            # keep a call alive forever. After a long pause the assistant asks if they are still there (in a noisy
+            # room it also suggests a quieter spot); after two such questions and more silence the call ends.
+            idle = now - self.last_activity
+            if idle > SILENCE_NUDGE_S:
+                noisy = len(self.loud) >= 100 and sum(self.loud) / len(self.loud) > 0.5
+                if self.nudges < 2:
+                    self.nudges += 1
+                    self.last_activity = now
+                    if noisy:
+                        self.note("still_there_prompt_noisy", n=self.nudges)
+                        if self.nudges == 1:   # first time: just say we cannot hear well, do not blame the caller
+                            text = "[system note: you have not recognised any words for a while and the line is noisy. In the call language, in one short sentence, ask if they are still there and say you are having trouble hearing them.]"
+                        else:                  # second time: now suggest what to do about it
+                            text = "[system note: you still cannot make out any words because of background noise. In the call language, in one short sentence, ask them to move somewhere quieter or speak closer to the microphone.]"
+                    else:
+                        self.note("still_there_prompt", n=self.nudges)
+                        text = "[system note: the caller has been silent for a while. Gently ask, in their language, if they are still there. One short sentence.]"
+                    await g.send(json.dumps({"realtimeInput": {"text": text}}))
+                else:
+                    if noisy:
+                        await self.emit(type="error", text="The line is too noisy for me to understand. Please call again from a quieter place.")
+                        self.end_reason = self.end_reason or "noisy_line_no_speech_recognised"
+                    else:
+                        await self.emit(type="hangup")
+                        self.end_reason = self.end_reason or "caller_silent_after_2_prompts"
                     return
-                if self.noise_notes < 3 and now - self.last_noise_note > 25:
-                    self.noise_notes += 1
-                    self.last_noise_note = now
-                    self.note("noise_note", n=self.noise_notes, loud_pct=int(100 * loud_ratio))
-                    await g.send(json.dumps({"realtimeInput": {"text": "[system note: there is a lot of background noise and you cannot make out what the caller says. In the call language, in one short sentence, ask them to move somewhere quieter or speak closer to the microphone.]"}}))
-                continue
-            idle = now - max(self.last_activity, self.last_voice_at)   # any real sound from the caller counts as presence
-            if idle > SILENCE_NUDGE_S and self.nudges < 2:
-                self.nudges += 1
-                self.last_activity = now
-                self.note("still_there_prompt", n=self.nudges)
-                await g.send(json.dumps({"realtimeInput": {"text": "[system note: the caller has been silent for a while. Gently ask, in their language, if they are still there. One short sentence.]"}}))
-            elif idle > SILENCE_NUDGE_S and self.nudges >= 2:
-                await self.emit(type="hangup")
-                self.end_reason = self.end_reason or "caller_silent_after_2_prompts"
-                return
 
     def _record_call(self) -> None:
         summary = {
