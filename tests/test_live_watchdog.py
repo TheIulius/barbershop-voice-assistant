@@ -75,12 +75,31 @@ def test_no_nudge_while_assistant_is_talking_or_playing(call):
     assert texts(g) == []
 
 
-def test_no_nudge_when_it_is_not_the_callers_turn(call):
+def test_no_nudge_right_after_the_caller_spoke(call):
     g = FakeG()
-    call.waiting_for_caller = False         # e.g. the assistant is thinking
-    call.last_activity = time.time() - 60
+    call.waiting_for_caller = False         # the caller just spoke; the model is about to answer
+    call.last_activity = time.time() - 4
     assert not asyncio.run(run_watchdog(call, g, 1.5))
     assert texts(g) == []
+
+
+def test_model_slow_to_reply_to_the_caller_gets_nudged_not_the_caller(call):
+    g = FakeG()
+    call.waiting_for_caller = False
+    call.last_activity = time.time() - 12
+    assert not asyncio.run(run_watchdog(call, g, 1.5))
+    sent = texts(g)
+    assert len(sent) == 1 and "finished speaking" in sent[0] and "still there" not in sent[0]
+
+
+def test_model_that_never_replies_to_the_caller_ends_the_call_visibly(call):
+    g = FakeG()
+    call.waiting_for_caller = False
+    call.reply_nudged = True
+    call.last_activity = time.time() - 31
+    assert asyncio.run(run_watchdog(call, g, 1.5))
+    assert call.end_reason == "model_never_replied_to_caller"
+    assert any(e["type"] == "error" and "stopped answering" in e["text"] for e in call.ws.events)
 
 
 def test_caller_silence_gets_gentle_prompt_then_hangup(call):

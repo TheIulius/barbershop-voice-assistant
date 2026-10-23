@@ -21,6 +21,9 @@ services:
       - { key: MAX_CONCURRENT_CALLS, value: "3" }
       - { key: MAX_CALL_SECONDS, value: "420" }
       - { key: LIVE_MAX_CALLS_10MIN, value: "8" }
+      - { key: ARCHIVE_BRANCH, value: call-logs }
+      - { key: ARCHIVE_REPO, sync: false }          # "owner/name" of a PRIVATE logs-only repository (optional)
+      - { key: ARCHIVE_GITHUB_TOKEN, sync: false }  # fine-grained token limited to that repo, Contents: read & write
       - { key: GEMINI_API_KEY, sync: false }
       - { key: APP_PASSWORD_HASH, sync: false }
       - { key: SESSION_SECRET, sync: false }

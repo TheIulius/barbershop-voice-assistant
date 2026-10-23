@@ -31,6 +31,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 
 from .actions import Actions, Session
 from .agent import Agent, LANG_NAMES, T
+from . import archive
 from .shop import Reject
 from .textutil import sanitize_user_text
 
@@ -228,6 +229,7 @@ class LiveCall:
         self.waiting_for_caller = False   # the assistant finished a turn and it is now the caller's move
         self.pending_since = None     # when we answered a tool call and are waiting for the model to speak
         self.stall_nudged = False
+        self.reply_nudged = False
         self.model_speaking = False   # the model is mid-turn
         self.mic_frames = self.mic_clipped = self.mic_loud = 0
         self.mic_peak = 0
@@ -480,6 +482,7 @@ class LiveCall:
                 it = sc.get("inputTranscription")
                 if it and it.get("text"):
                     self.waiting_for_caller = False
+                    self.reply_nudged = False
                     self.user_buf += it["text"]
                     self.last_activity = time.time()
                     self.speech_end_at = time.time()
@@ -522,6 +525,7 @@ class LiveCall:
                 if sc.get("turnComplete"):
                     self.model_speaking = False
                     self.waiting_for_caller = True
+                    self.reply_nudged = False
                     self.pending_since = None
                     self._flush_user()
                     if self.ai_buf.strip():
@@ -576,8 +580,20 @@ class LiveCall:
                     await g.send(json.dumps({"realtimeInput": {"text": "[system note: the lookup finished. Tell the caller the result now, in the call language, in one or two short sentences.]"}}))
                 self.last_activity = now
                 continue
-            if not self.waiting_for_caller:              # mid-exchange: not the caller's silence
-                self.last_activity = now
+            if not self.waiting_for_caller:
+                # The caller has spoken (or the model is mid-turn) and no reply is coming. This is the model being slow,
+                # not the caller being silent: after 10 s tell the model to answer, after 30 s give up with a clear message.
+                owed = now - self.last_activity
+                if owed > 30:
+                    print("[call] the model never replied to the caller: ending the call", flush=True)
+                    await self.emit(type="error", text="The voice service stopped answering. Press Call to start again.")
+                    self.end_reason = self.end_reason or "model_never_replied_to_caller"
+                    return
+                if owed > 10 and not self.reply_nudged:
+                    self.reply_nudged = True
+                    self.note("reply_nudge", seconds=int(owed))
+                    print(f"[call] no reply {owed:.0f}s after the caller spoke: nudging the model", flush=True)
+                    await g.send(json.dumps({"realtimeInput": {"text": "[system note: the caller has finished speaking and is waiting. Answer them now, in the call language, in one or two short sentences.]"}}))
                 continue
             # The caller's "presence" is recognised words / a model reply, NOT raw sound: a TV or a busy street must not
             # keep a call alive forever. After a long pause the assistant asks if they are still there (in a noisy
@@ -618,6 +634,7 @@ class LiveCall:
         }
         CALL_LOG.append(summary)
         print("[calllog] " + json.dumps(summary, ensure_ascii=False), flush=True)
+        archive.archive_call(summary)          # survives restarts (only if ARCHIVE_* settings exist)
 
     async def run(self) -> None:
         await self.ws.accept()

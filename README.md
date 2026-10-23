@@ -28,6 +28,21 @@ Free-tier behaviour: the service sleeps after ~15 min without traffic and wakes 
 paste the new `APP_PASSWORD_HASH` into Render. Use a long passphrase: online guessing is limited to 5 tries per
 15 minutes per connection, but nothing protects a short or guessable password if someone knows it.
 
+## Keep call records after restarts (optional, recommended while testing)
+
+Call records (what was said, tool results, why the call ended) live in server memory and vanish on every restart.
+To keep them, the server can commit one small JSON file per call to a GitHub repo, on its own branch (`call-logs`):
+
+1. Create a **private** repository that holds only logs (e.g. `barbershop-call-logs`). Do not reuse the code repo:
+   a token that can write to the code repo could be abused to push code that Render then deploys.
+2. GitHub → Settings → Developer settings → Fine-grained tokens → new token, **only that repo**,
+   permission **Contents: Read and write**, nothing else.
+3. In Render → Environment add `ARCHIVE_REPO` (`owner/name`) and `ARCHIVE_GITHUB_TOKEN` (the token). Optional:
+   `ARCHIVE_BRANCH` (default `call-logs`), `ARCHIVE_MASK_NUMBERS=0` to keep phone numbers (default hides long digit runs).
+
+Failures never affect a call (they are printed as `[archive] FAILED ...` in the Render logs). Records contain what
+callers said: keep the repo private and use fake data while testing.
+
 ## 0. The live call (recommended) — natural talking, interruptions, Kore voice
 
 `http://localhost:8000/` is a real-time voice call (Gemini Live, model `gemini-3.8-live`, voice **Kore**).
