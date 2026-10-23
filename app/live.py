@@ -296,7 +296,7 @@ class LiveCall:
 
     async def _connect(self):
         key = os.environ.get("GEMINI_API_KEY", "")
-        primary = os.environ.get("GEMINI_LIVE_MODEL", "gemini-3.1-flash-live-preview")
+        primary = os.environ.get("LIVE_PRIMARY_MODEL", "gemini-3.1-flash-live-preview")   # (the old GEMINI_LIVE_MODEL setting is ignored on purpose)
         models = [primary] + [m for m in ("gemini-3.8-live", "gemini-3.1-flash-live-preview") if m != primary]
         last = ""
         for model in models:
