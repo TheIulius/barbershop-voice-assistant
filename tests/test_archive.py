@@ -97,3 +97,33 @@ def test_retry_then_success(monkeypatch, capsys):
 def test_masking_can_be_switched_off(monkeypatch):
     monkeypatch.setenv("ARCHIVE_MASK_NUMBERS", "0")
     assert archive.scrub(SUMMARY)["trail"][0]["text"] == SUMMARY["trail"][0]["text"]
+
+
+def test_settings_are_cleaned_up(monkeypatch):
+    monkeypatch.setenv("ARCHIVE_REPO", " https://github.com/me/logs.git ")
+    monkeypatch.setenv("ARCHIVE_GITHUB_TOKEN", "  github_pat_abc\n")
+    token, repo, branch = archive._cfg()
+    assert (token, repo, branch) == ("github_pat_abc", "me/logs", "call-logs")
+
+
+def test_check_reports_the_reason_when_the_repo_is_unreachable(monkeypatch):
+    class NotFound(FakeGitHub):
+        def get(self, url, **kw):
+            self.calls.append(("GET", url))
+            r = Resp(404, {"message": "Not Found"})
+            return r
+    monkeypatch.setattr(archive, "requests", NotFound())
+    out = archive.check()
+    assert not out["ok"] and "404" in out["problem"] and "Not Found" in out["problem"]
+
+
+def test_check_ok_creates_branch(monkeypatch):
+    gh = FakeGitHub()
+    monkeypatch.setattr(archive, "requests", gh)
+    out = archive.check()
+    assert out["ok"] and out["branch"] == "call-logs"
+
+
+def test_status_never_contains_the_token(monkeypatch):
+    s = json.dumps(archive.status())
+    assert "t0ken" not in s

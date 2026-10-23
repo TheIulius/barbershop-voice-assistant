@@ -38,8 +38,8 @@ def login(client, pw=PASSWORD):
     return client.post("/login", json={"password": pw})
 
 
-PROTECTED_GET = ["/api/calls", "/", "/classic", "/lab", "/api/health", "/api/bookings", "/api/config", "/api/lab/options", "/docs", "/openapi.json", "/static/live.html"]
-PROTECTED_POST = ["/api/start", "/api/chat", "/api/stt", "/api/tts", "/api/lab/tts", "/logout-not-a-route"]
+PROTECTED_GET = ["/api/calls", "/api/archive", "/", "/classic", "/lab", "/api/health", "/api/bookings", "/api/config", "/api/lab/options", "/docs", "/openapi.json", "/static/live.html"]
+PROTECTED_POST = ["/api/archive/check", "/api/start", "/api/chat", "/api/stt", "/api/tts", "/api/lab/tts", "/logout-not-a-route"]
 
 
 @pytest.mark.parametrize("path", PROTECTED_GET)

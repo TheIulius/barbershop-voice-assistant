@@ -30,9 +30,29 @@ _branch_ready = {"ok": False}
 _lock = threading.Lock()
 
 
+STATUS = {"last_attempt_utc": "", "last_ok": None, "last_error": "", "saved": 0, "failed": 0}
+
+
 def _cfg():
-    return (os.environ.get("ARCHIVE_GITHUB_TOKEN", ""), os.environ.get("ARCHIVE_REPO", ""),
-            os.environ.get("ARCHIVE_BRANCH", "call-logs"))
+    token = os.environ.get("ARCHIVE_GITHUB_TOKEN", "").strip()
+    repo = os.environ.get("ARCHIVE_REPO", "").strip()
+    for junk in ("https://github.com/", "http://github.com/", "github.com/"):
+        if repo.startswith(junk):
+            repo = repo[len(junk):]
+    repo = repo.strip("/").removesuffix(".git") if hasattr(str, "removesuffix") else repo.strip("/")
+    if repo.endswith(".git"):
+        repo = repo[:-4]
+    branch = os.environ.get("ARCHIVE_BRANCH", "call-logs").strip() or "call-logs"
+    return token, repo, branch
+
+
+def _why(r) -> str:
+    """HTTP status plus GitHub's own explanation (never contains our secrets)."""
+    try:
+        msg = r.json().get("message", "")
+    except Exception:
+        msg = ""
+    return f"http {r.status_code} {msg}".strip()
 
 
 def enabled() -> bool:
@@ -70,10 +90,10 @@ def _ensure_branch(token: str, repo: str, branch: str) -> None:
         _branch_ready["ok"] = True
         return
     if r.status_code != 404:
-        raise RuntimeError(f"cannot check branch: http {r.status_code}")
+        raise RuntimeError(f"cannot check branch: {_why(r)}")
     info = requests.get(f"{API}/repos/{repo}", headers=h, timeout=15)
     if info.status_code != 200:
-        raise RuntimeError(f"cannot read repo: http {info.status_code} (token lacks access?)")
+        raise RuntimeError(f"cannot read repo {repo}: {_why(info)} (wrong name, or the token was not given access to this repository)")
     default = info.json().get("default_branch", "main")
     base = requests.get(f"{API}/repos/{repo}/git/ref/heads/{default}", headers=h, timeout=15)
     if base.status_code == 404 or base.status_code == 409:
@@ -81,14 +101,14 @@ def _ensure_branch(token: str, repo: str, branch: str) -> None:
         c = requests.put(f"{API}/repos/{repo}/contents/README.md", headers=h, timeout=20,
                          json={"message": "init", "content": base64.b64encode(b"# call logs\n").decode()})
         if c.status_code not in (200, 201):
-            raise RuntimeError(f"cannot initialise empty repo: http {c.status_code}")
+            raise RuntimeError(f"cannot initialise empty repo: {_why(c)}")
         base = requests.get(f"{API}/repos/{repo}/git/ref/heads/{default}", headers=h, timeout=15)
     if base.status_code != 200:
-        raise RuntimeError(f"cannot read default branch: http {base.status_code}")
+        raise RuntimeError(f"cannot read default branch: {_why(base)}")
     sha = base.json()["object"]["sha"]
     mk = requests.post(f"{API}/repos/{repo}/git/refs", headers=h, timeout=15, json={"ref": f"refs/heads/{branch}", "sha": sha})
     if mk.status_code not in (200, 201, 422):       # 422 = it already exists (another call created it first)
-        raise RuntimeError(f"cannot create branch: http {mk.status_code}")
+        raise RuntimeError(f"cannot create branch: {_why(mk)} (the token needs Contents: Read and write)")
     _branch_ready["ok"] = True
 
 
@@ -105,12 +125,14 @@ def _put(summary: dict) -> None:
                 _ensure_branch(token, repo, branch)
             r = requests.put(f"{API}/repos/{repo}/contents/{path}", headers=_headers(token), json=body, timeout=20)
             if r.status_code in (200, 201):
+                STATUS.update(last_attempt_utc=time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()), last_ok=True, last_error="", saved=STATUS["saved"] + 1)
                 print(f"[archive] saved {path}", flush=True)
                 return
-            last = f"http {r.status_code}"
+            last = f"writing the file: {_why(r)}"
         except Exception as e:  # network trouble, bad token, ...
-            last = f"{type(e).__name__}: {str(e)[:100]}"
+            last = f"{type(e).__name__}: {str(e)[:160]}"
         time.sleep(2 * (attempt + 1))
+    STATUS.update(last_attempt_utc=time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()), last_ok=False, last_error=last, failed=STATUS["failed"] + 1)
     print(f"[archive] FAILED to save call {data['id']}: {last}", flush=True)
 
 
@@ -121,3 +143,30 @@ def archive_call(summary: dict) -> Optional[threading.Thread]:
     t = threading.Thread(target=_put, args=(summary,), daemon=True)
     t.start()
     return t
+
+
+def status() -> dict:
+    token, repo, branch = _cfg()
+    return {"enabled": enabled(), "repo": repo or "(not set)", "branch": branch,
+            "token_present": bool(token), "token_length": len(token), "token_kind": token.split("_")[0] + "_…" if "_" in token else "(unrecognised format)",
+            **STATUS}
+
+
+def check() -> dict:
+    """Try the whole chain without saving a call: token valid? repo reachable? branch exists or can be created?"""
+    token, repo, branch = _cfg()
+    if not enabled():
+        return {"ok": False, "problem": "ARCHIVE_GITHUB_TOKEN and/or ARCHIVE_REPO (owner/name) are not set on the server"}
+    try:
+        h = _headers(token)
+        me = requests.get(f"{API}/repos/{repo}", headers=h, timeout=15)
+        if me.status_code != 200:
+            return {"ok": False, "problem": f"cannot read repo {repo}: {_why(me)}",
+                    "hint": "check the spelling owner/name; the token must be a fine-grained token that includes THIS repository"}
+        perms = me.json().get("permissions", {})
+        _branch_ready["ok"] = False
+        with _lock:
+            _ensure_branch(token, repo, branch)
+        return {"ok": True, "repo": repo, "branch": branch, "permissions": perms, "message": "branch exists or was just created"}
+    except Exception as e:
+        return {"ok": False, "problem": str(e)[:300]}

@@ -22,6 +22,7 @@ from .shop import Shop
 from . import tts
 from .lab import router as lab_router
 from .live import handle_call, CALL_LOG
+from . import archive
 from .auth import Auth, AuthMiddleware, make_router
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -120,6 +121,18 @@ async def ws_call(ws: WebSocket):
 def calls(limit: int = 20):
     """Recent calls with their event trail and the reason each one ended (memory only; resets when the server restarts)."""
     return list(CALL_LOG)[-max(1, min(limit, 40)):][::-1]
+
+
+@app.get("/api/archive")
+def archive_status():
+    """Is saving call records to GitHub switched on, and did the last attempt work? (no secrets are shown)"""
+    return archive.status()
+
+
+@app.post("/api/archive/check")
+def archive_check():
+    """Try the GitHub connection right now and say exactly what is wrong, if anything."""
+    return archive.check()
 
 
 @app.get("/api/config")
