@@ -1,0 +1,16 @@
+{
+ "id": "f26aa86e",
+ "started_utc": "2026-10-23 19:56:47",
+ "seconds": 1.6,
+ "reason": "caller_pressed_hang_up",
+ "model": "gemini-3.8-live",
+ "lang": "ka",
+ "tools": 0,
+ "tokens": 0,
+ "mic": {
+  "frames": 0,
+  "peak": 0.0,
+  "loud_pct": 0
+ },
+ "trail": []
+}
