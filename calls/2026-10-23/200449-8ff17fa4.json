@@ -1,0 +1,22 @@
+{
+ "id": "8ff17fa4",
+ "started_utc": "2026-10-23 20:04:49",
+ "seconds": 5.6,
+ "reason": "caller_pressed_hang_up",
+ "model": "gemini-3.8-live",
+ "lang": "ka",
+ "tools": 0,
+ "tokens": 3349,
+ "mic": {
+  "frames": 0,
+  "peak": 0.0,
+  "loud_pct": 0
+ },
+ "trail": [
+  {
+   "t": 5.5,
+   "what": "assistant",
+   "text": "გამარჯობა! ნიმუშის ბარბერშოპი. რით შემიძლია დაგეხმაროთ?"
+  }
+ ]
+}
