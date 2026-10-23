@@ -1,0 +1,22 @@
+{
+ "id": "725f12fb",
+ "started_utc": "2026-10-23 20:05:20",
+ "seconds": 6.0,
+ "reason": "caller_pressed_hang_up",
+ "model": "gemini-3.8-live",
+ "lang": "ka",
+ "tools": 0,
+ "tokens": 3360,
+ "mic": {
+  "frames": 0,
+  "peak": 0.0,
+  "loud_pct": 0
+ },
+ "trail": [
+  {
+   "t": 6.0,
+   "what": "assistant",
+   "text": "გამარჯობა, ნიმუშის ბარბერშოპი გისმენთ. რით შემიძლია დაგეხმაროთ?"
+  }
+ ]
+}
