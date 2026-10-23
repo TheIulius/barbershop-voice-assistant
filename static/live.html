@@ -46,7 +46,11 @@
     </div>
     <div class="meter"><div id="level"></div></div>
     <div id="state"></div>
-    <div class="row sub" id="dbg" style="margin-top:10px">
+    <div class="row sub" style="margin-top:10px">
+      <label><input type="checkbox" id="hp"> I'm wearing headphones (lets you interrupt freely)</label>
+      <button id="dbgcopy" style="padding:2px 8px;font-size:12px">copy debug info</button>
+    </div>
+    <div class="row sub" id="dbg" style="margin-top:6px">
       <label><input type="checkbox" id="raw"> raw mic (no echo/noise/gain processing)</label>
       <label><input type="checkbox" id="save"> save my voice on this computer for debugging</label>
     </div>
@@ -69,6 +73,9 @@
 <script>
 const $ = id => document.getElementById(id);
 let ws = null, stream = null, micCtx = null, outCtx = null, node = null;
+const dlogBuf = []; let t0call = 0;
+function dlog(what, extra) { dlogBuf.push({ t: Math.round(performance.now() - t0call), what, queued_s: outCtx ? +Math.max(0, nextT - outCtx.currentTime).toFixed(2) : 0, ...extra }); if (dlogBuf.length > 400) dlogBuf.shift(); }
+let loudRun = 0, bargeOpen = false;
 let nextT = 0, sources = [], lang = 'ka', muted = false, hangingUp = false;
 let userEl = null, aiEl = null, aiText = '', better = { text: '', t: 0 };
 
@@ -103,9 +110,20 @@ async function openAudio() {
   await micCtx.audioWorklet.addModule(URL.createObjectURL(new Blob([WORKLET], { type: 'application/javascript' })));
   const src = micCtx.createMediaStreamSource(stream);
   node = new AudioWorkletNode(micCtx, 'pcm');
+  const SILENCE = new ArrayBuffer(1280);
   node.port.onmessage = e => {
-    $('level').style.width = Math.min(100, e.data.rms * 500) + '%';
-    if (ws && ws.readyState === 1 && !muted) ws.send(e.data.pcm);
+    const rms = e.data.rms;
+    $('level').style.width = Math.min(100, rms * 500) + '%';
+    if (!(ws && ws.readyState === 1) || muted) return;
+    // Speaker mode (no headphones): while the assistant is talking, only let real, loud speech through, so its own
+    // voice leaking into the microphone cannot make Gemini think you interrupted.
+    let send = true;
+    if (sources.length && !$('hp').checked) {
+      loudRun = rms > 0.05 ? loudRun + 1 : 0;
+      if (loudRun >= 4) { if (!bargeOpen) dlog('barge-in opened', { rms: +rms.toFixed(3) }); bargeOpen = true; }
+      send = bargeOpen;
+    } else { loudRun = 0; if (!sources.length) bargeOpen = false; }
+    ws.send(send ? e.data.pcm : SILENCE);
   };
   src.connect(node);
 }
@@ -117,33 +135,37 @@ function closeAudio() {
 }
 
 // ---- playback: queue small buffers back to back; flush instantly when interrupted
+let playingNow = false;
+function setPlaying(v) { if (v !== playingNow) { playingNow = v; if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'playing', value: v })); } }
 function playChunk(arrayBuf) {
   if (!outCtx) return;
+  if (outCtx.state !== 'running') { dlog('audio context was ' + outCtx.state + ', resuming'); outCtx.resume(); }
   const i16 = new Int16Array(arrayBuf), f = new Float32Array(i16.length);
   for (let i = 0; i < i16.length; i++) f[i] = i16[i] / 32768;
   const b = outCtx.createBuffer(1, f.length, 24000); b.copyToChannel(f, 0);
   const s = outCtx.createBufferSource(); s.buffer = b; s.connect(outCtx.destination);
   const at = Math.max(outCtx.currentTime + 0.03, nextT); s.start(at); nextT = at + b.duration;
-  sources.push(s); s.onended = () => { sources = sources.filter(x => x !== s); if (!sources.length && hangingUp) finish(); };
+  sources.push(s); setPlaying(true); s.onended = () => { sources = sources.filter(x => x !== s); if (!sources.length) { setPlaying(false); if (hangingUp) finish(); } };
 }
-function flushPlayback() { sources.forEach(s => { try { s.stop(); } catch (e) {} }); sources = []; nextT = 0; }
+function flushPlayback() { sources.forEach(s => { s.onended = null; try { s.stop(); } catch (e) {} }); sources = []; nextT = 0; setPlaying(false); }
 
 // ---- call
 async function start() {
   $('call').disabled = true; state('Connecting…'); $('log').innerHTML = ''; hangingUp = false; userEl = aiEl = null; aiText = '';
   try { await openAudio(); } catch (e) { state('<span style="color:var(--bad)">Microphone problem: ' + (e.message || e.name) + '. Click the lock icon in the address bar and allow the microphone.</span>'); closeAudio(); $('call').disabled = false; return; }
   ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/call?lang=' + lang + ($('save').checked ? '&save_audio=1' : ''));
-  ws.binaryType = 'arraybuffer';
+  ws.binaryType = 'arraybuffer'; t0call = performance.now(); dlogBuf.length = 0; bargeOpen = false;
   ws.onmessage = ev => { if (typeof ev.data !== 'string') { playChunk(ev.data); return; } onEvent(JSON.parse(ev.data)); };
   ws.onclose = () => { if ($('call').classList.contains('live') || ws) { if (!sources.length) finish(); else hangingUp = true; } };
   $('call').disabled = false;
 }
 function onEvent(e) {
+  if (e.type !== 'ai' && e.type !== 'user') dlog('event:' + e.type, e.latency_ms ? { latency_ms: e.latency_ms } : {});
   if (e.type === 'ready') { $('call').textContent = 'Hang up'; $('call').classList.add('live'); $('mute').disabled = false; state('<b>Connected</b> · voice ' + e.voice + ' · talk any time'); }
   else if (e.type === 'user') { if (!userEl || userEl.dataset.done) { userEl = add('me', ''); aiEl = null; aiText = ''; } if (e.unclear) { userEl.title = 'live model transcript: ' + e.text; const fresh = better.text && (performance.now() - better.t) < 9000; userEl.textContent = fresh ? better.text : '(transcript unclear)'; userEl.dataset.unclear = fresh ? '' : '1'; userEl.classList.add('cut'); } else { userEl.classList.remove('cut'); userEl.textContent = e.text; } state('<b>Listening…</b>'); }
   else if (e.type === 'heard2') { better = { text: e.text, t: performance.now() }; const last = [...document.querySelectorAll('.msg.me')].pop(); if (last && last.dataset.unclear === '1') { last.textContent = e.text; last.dataset.unclear = ''; } }
   else if (e.type === 'ai') { if (userEl) userEl.dataset.done = '1'; if (!aiEl) aiEl = add('ai', ''); aiEl.textContent = e.text; state('<b>Assistant is talking</b> — you can interrupt'); }
-  else if (e.type === 'interrupted') { flushPlayback(); if (aiEl) aiEl.classList.add('cut'); aiEl = null; state('<b>Interrupted</b> — go ahead'); }
+  else if (e.type === 'interrupted') { dlog('FLUSH playback', { sources: sources.length, mic_rms: +(+$('level').style.width.replace('%','') / 500).toFixed(3) }); const t = document.createElement('div'); t.className = 'tool'; t.textContent = '· interrupted ·'; $('log').appendChild(t); flushPlayback(); if (aiEl) aiEl.classList.add('cut'); aiEl = null; state('<b>Interrupted</b> — go ahead'); }
   else if (e.type === 'turn_end') { aiEl = null; userEl = null; state('<b>Listening…</b>' + (e.latency_ms ? ' <span class="sub">(replied in ' + (e.latency_ms / 1000).toFixed(1) + ' s)</span>' : '')); }
   else if (e.type === 'tool') { const t = document.createElement('div'); t.className = 'tool'; t.textContent = '· ' + ({ check_availability: 'checking the calendar', book: 'preparing booking', confirm_booking: 'confirming booking', cancel_pending: 'cancelling', request_callback: 'saving callback', end_call: 'ending call' }[e.name] || e.name) + ' ·'; $('log').appendChild(t); $('log').scrollTop = 1e9; }
   else if (e.type === 'booked') { const t = document.createElement('div'); t.className = 'tool ok'; t.textContent = '✔ Booked: ' + e.service + ' · ' + e.start + ' · ' + e.name; $('log').appendChild(t); loadBooks(); }
@@ -158,6 +180,8 @@ function finish() {
 }
 $('call').onclick = () => { if ($('call').classList.contains('live') || ws) { if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'hangup' })); finish(); } else start(); };
 $('mute').onclick = () => { muted = !muted; $('mute').textContent = muted ? 'Unmute mic' : 'Mute mic'; $('mute').classList.toggle('on', muted); };
+$('dbgcopy').onclick = async () => { const txt = JSON.stringify({ ua: navigator.userAgent, headphones: $('hp').checked, raw: $('raw') ? $('raw').checked : null, log: dlogBuf }, null, 1); try { await navigator.clipboard.writeText(txt); $('dbgcopy').textContent = 'copied!'; } catch (e) { $('dbgcopy').textContent = 'copy failed'; } setTimeout(() => $('dbgcopy').textContent = 'copy debug info', 2000); };
+try { $('hp').checked = localStorage.getItem('hp') === '1'; $('hp').onchange = () => localStorage.setItem('hp', $('hp').checked ? '1' : '0'); } catch (e) {}
 function sendTyped() { const t = $('typed').value.trim(); if (!t || !ws || ws.readyState !== 1) return; $('typed').value = ''; ws.send(JSON.stringify({ type: 'text', text: t })); }
 $('send').onclick = sendTyped; $('typed').onkeydown = e => { if (e.key === 'Enter') sendTyped(); };
 

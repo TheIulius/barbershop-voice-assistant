@@ -207,6 +207,8 @@ class LiveCall:
         self.first_audio_ms: Optional[int] = None
         self.speech_end_at: Optional[float] = None
         self.lang_corrections = 0
+        self.playing = False          # the caller's browser is still playing the assistant's audio
+        self.model_speaking = False   # the model is mid-turn
         self.mic_frames = self.mic_clipped = self.mic_loud = 0
         self.mic_peak = 0
         self.save_audio = False
@@ -237,7 +239,7 @@ class LiveCall:
         }
         if with_vad:
             cfg["realtimeInputConfig"] = {"automaticActivityDetection": {
-                "startOfSpeechSensitivity": "START_SENSITIVITY_HIGH",
+                "startOfSpeechSensitivity": "START_SENSITIVITY_LOW",
                 "endOfSpeechSensitivity": "END_SENSITIVITY_HIGH",
                 "prefixPaddingMs": 300, "silenceDurationMs": 700}}
         return {"setup": cfg}
@@ -354,6 +356,10 @@ class LiveCall:
                     continue
                 if c.get("type") == "hangup":
                     return
+                if c.get("type") == "playing":
+                    self.playing = bool(c.get("value"))
+                    if not self.playing:
+                        self.last_activity = time.time()   # silence is counted from when the assistant stops being HEARD
                 if c.get("type") == "text" and self.debug:  # dev only: type instead of speaking (used by red-team tests)
                     t = sanitize_user_text(str(c.get("text", "")), "<<none>>")
                     self.user_buf += " " + t
@@ -434,6 +440,7 @@ class LiveCall:
                         if self.speech_end_at and self.first_audio_ms is None:
                             self.first_audio_ms = int((time.time() - self.speech_end_at) * 1000)
                         self._flush_user()
+                        self.model_speaking = True
                         await self.ws.send_bytes(base64.b64decode(d))
                 ot = sc.get("outputTranscription")
                 if ot and ot.get("text"):
@@ -454,10 +461,12 @@ class LiveCall:
                         continue
                     await self.emit(type="ai", text=self.ai_buf.strip())
                 if sc.get("interrupted"):
+                    self.model_speaking = False
                     self.ai_buf = ""
                     self.first_audio_ms = None
                     await self.emit(type="interrupted")
                 if sc.get("turnComplete"):
+                    self.model_speaking = False
                     self._flush_user()
                     self.ai_buf = ""
                     await self.emit(type="turn_end", latency_ms=self.first_audio_ms)
@@ -486,6 +495,9 @@ class LiveCall:
             if time.time() - self.t0 > MAX_CALL_SECONDS:
                 await self.emit(type="error", text="Maximum call length reached.")
                 return
+            if self.playing or self.model_speaking:     # never talk over (or cut off) the assistant's own sentence
+                self.last_activity = time.time()
+                continue
             idle = time.time() - self.last_activity
             if idle > SILENCE_NUDGE_S and self.nudges < 2:
                 self.nudges += 1
