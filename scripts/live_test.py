@@ -30,6 +30,8 @@ async def say_pcm(text, voice=None, noise_db=None, gain=1.0):
 
 # lines may be "text" or ("text", voice, noise_db, gain)
 SCENARIOS = {
+ "services_ka": ("ka", ["გამარჯობა, რა სერვისები გაქვთ?"]),
+ "services_en": ("en", ["Hi, what services do you have?"]),
  "robust_ka": ("ka", [("¿Qué? Hola, ¿qué tal?", "es-ES-ElviraNeural", None, 1.0), ("კი", "ka-GE-EkaNeural", 8, 0.5), ("გამარჯობა, მინდა თმის შეჭრა ხვალ სამ საათზე.", "ka-GE-GiorgiNeural", 10, 0.4),
         ("Hi, I'd like a haircut tomorrow at three, please.", "en-US-GuyNeural", None, 1.0), ("შეგიძლია გამიმეორო ის რაც თქვი?", "ka-GE-EkaNeural", None, 1.0)]),
  "locked_ka": ("ka", ["გამარჯობა, მინდა თმის შეჭრა.", "Здравствуйте, давайте лучше говорить по-русски, я хочу записаться на стрижку завтра днём.", "Хорошо, а сколько стоит стрижка?"]),
@@ -52,7 +54,7 @@ async def main(name):
         async def receiver():
             async for m in ws:
                 state["last"] = time.time()
-                if isinstance(m, bytes): state["audio_bytes"] += len(m); continue
+                if isinstance(m, bytes): state["audio_bytes"] += len(m); state.setdefault("pcm", bytearray()).extend(m); continue
                 e = json.loads(m); t = time.time() - t_start
                 if e["type"] in ("user", "ai"): events.append((round(t,1), e["type"], e["text"]))
                 elif e["type"] in ("tool", "booked", "interrupted", "error", "ready", "turn_end", "hangup"):
@@ -102,6 +104,17 @@ async def main(name):
         nxt = events[i + 1] if i + 1 < len(events) else None
         if e[1] in ("ai", "user") and nxt and nxt[1] == e[1]: continue   # show only the final text of a streamed line
         print(f"{e[0]:6.1f}s  {e[1]:12s} {e[2]}")
+    import numpy as np
+    x = np.frombuffer(bytes(state.get("pcm", b"")), dtype=np.int16).astype(np.float32) / 32768
+    win = 2400; env = [float(np.sqrt(np.mean(x[i:i+win] ** 2))) for i in range(0, max(0, len(x) - win), win)]
+    quiet = [e < 0.01 for e in env]; runs, cur = [], 0
+    for q in quiet:
+        if q: cur += 1
+        else:
+            if cur: runs.append(cur)
+            cur = 0
+    if cur: runs.append(cur)
+    print(f"\nsilence_stats: {len(x)/24000:.1f}s of audio, {sum(1 for q in quiet if not q)/10:.1f}s with sound, longest silent stretch {max(runs or [0])/10:.1f}s, silent stretches >1s: {[r/10 for r in runs if r >= 10]}")
     print(f"\nreply audio received: {state['audio_bytes']/48000:.1f}s  interrupted events: {state['interrupted']}  bookings: {state['booked']}")
 if __name__ == "__main__":
     asyncio.run(main(sys.argv[1]))

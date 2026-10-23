@@ -135,13 +135,19 @@ function closeAudio() {
 }
 
 // ---- playback: queue small buffers back to back; flush instantly when interrupted
-let playingNow = false;
+let playingNow = false, skippedSilence = 0;
 function setPlaying(v) { if (v !== playingNow) { playingNow = v; if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'playing', value: v })); } }
 function playChunk(arrayBuf) {
   if (!outCtx) return;
   if (outCtx.state !== 'running') { dlog('audio context was ' + outCtx.state + ', resuming'); outCtx.resume(); }
   const i16 = new Int16Array(arrayBuf), f = new Float32Array(i16.length);
-  for (let i = 0; i < i16.length; i++) f[i] = i16[i] / 32768;
+  let sq = 0;
+  for (let i = 0; i < i16.length; i++) { f[i] = i16[i] / 32768; sq += f[i] * f[i]; }
+  // The voice service pads its stream with long stretches of silence AND sends audio faster than real time.
+  // Playing that silence in full would delay the next words by seconds, so silent chunks are skipped while we are
+  // already ahead of the clock (short natural pauses inside speech chunks are untouched).
+  const lead = nextT - outCtx.currentTime;
+  if (Math.sqrt(sq / i16.length) < 0.004 && lead > 0.4) { skippedSilence += f.length / 24000; return; }
   const b = outCtx.createBuffer(1, f.length, 24000); b.copyToChannel(f, 0);
   const s = outCtx.createBufferSource(); s.buffer = b; s.connect(outCtx.destination);
   const at = Math.max(outCtx.currentTime + 0.03, nextT); s.start(at); nextT = at + b.duration;
@@ -154,7 +160,7 @@ async function start() {
   $('call').disabled = true; state('Connecting…'); $('log').innerHTML = ''; hangingUp = false; userEl = aiEl = null; aiText = '';
   try { await openAudio(); } catch (e) { state('<span style="color:var(--bad)">Microphone problem: ' + (e.message || e.name) + '. Click the lock icon in the address bar and allow the microphone.</span>'); closeAudio(); $('call').disabled = false; return; }
   ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/call?lang=' + lang + ($('save').checked ? '&save_audio=1' : ''));
-  ws.binaryType = 'arraybuffer'; t0call = performance.now(); dlogBuf.length = 0; bargeOpen = false;
+  ws.binaryType = 'arraybuffer'; t0call = performance.now(); dlogBuf.length = 0; bargeOpen = false; skippedSilence = 0;
   ws.onmessage = ev => { if (typeof ev.data !== 'string') { playChunk(ev.data); return; } onEvent(JSON.parse(ev.data)); };
   ws.onclose = () => { if ($('call').classList.contains('live') || ws) { if (!sources.length) finish(); else hangingUp = true; } };
   $('call').disabled = false;
@@ -180,7 +186,7 @@ function finish() {
 }
 $('call').onclick = () => { if ($('call').classList.contains('live') || ws) { if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'hangup' })); finish(); } else start(); };
 $('mute').onclick = () => { muted = !muted; $('mute').textContent = muted ? 'Unmute mic' : 'Mute mic'; $('mute').classList.toggle('on', muted); };
-$('dbgcopy').onclick = async () => { const txt = JSON.stringify({ ua: navigator.userAgent, headphones: $('hp').checked, raw: $('raw') ? $('raw').checked : null, log: dlogBuf }, null, 1); try { await navigator.clipboard.writeText(txt); $('dbgcopy').textContent = 'copied!'; } catch (e) { $('dbgcopy').textContent = 'copy failed'; } setTimeout(() => $('dbgcopy').textContent = 'copy debug info', 2000); };
+$('dbgcopy').onclick = async () => { const txt = JSON.stringify({ ua: navigator.userAgent, headphones: $('hp').checked, raw: $('raw') ? $('raw').checked : null, skipped_silence_s: +skippedSilence.toFixed(1), log: dlogBuf }, null, 1); try { await navigator.clipboard.writeText(txt); $('dbgcopy').textContent = 'copied!'; } catch (e) { $('dbgcopy').textContent = 'copy failed'; } setTimeout(() => $('dbgcopy').textContent = 'copy debug info', 2000); };
 try { $('hp').checked = localStorage.getItem('hp') === '1'; $('hp').onchange = () => localStorage.setItem('hp', $('hp').checked ? '1' : '0'); } catch (e) {}
 function sendTyped() { const t = $('typed').value.trim(); if (!t || !ws || ws.readyState !== 1) return; $('typed').value = ''; ws.send(JSON.stringify({ type: 'text', text: t })); }
 $('send').onclick = sendTyped; $('typed').onkeydown = e => { if (e.key === 'Enter') sendTyped(); };
