@@ -1,0 +1,16 @@
+{
+ "id": "5b5247bb",
+ "started_utc": "2026-10-24 07:05:34",
+ "seconds": 1.1,
+ "reason": "caller_left (browser closed or connection dropped)",
+ "model": "gemini-3.1-flash-live-preview",
+ "lang": "en",
+ "tools": 0,
+ "tokens": 0,
+ "mic": {
+  "frames": 8,
+  "peak": 0.0,
+  "loud_pct": 0
+ },
+ "trail": []
+}
