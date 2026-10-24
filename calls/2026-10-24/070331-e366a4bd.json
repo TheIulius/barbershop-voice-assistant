@@ -1,0 +1,179 @@
+{
+ "id": "e366a4bd",
+ "started_utc": "2026-10-24 07:03:31",
+ "seconds": 122.7,
+ "reason": "assistant_ended_call_after_goodbye",
+ "model": "gemini-3.1-flash-live-preview",
+ "lang": "en",
+ "tools": 6,
+ "tokens": 7702,
+ "mic": {
+  "frames": 3052,
+  "peak": 0.76,
+  "loud_pct": 20
+ },
+ "trail": [
+  {
+   "t": 3.7,
+   "what": "assistant",
+   "text": "Hey, Sample Barbershop. How can I help you?"
+  },
+  {
+   "t": 12.8,
+   "what": "caller",
+   "text": "Uh hello, I want to book a appointment. I just want to listen what is your service."
+  },
+  {
+   "t": 17.7,
+   "what": "assistant",
+   "text": "Sure, we do haircuts, beard trims, and a combo of both. What were you looking for?"
+  },
+  {
+   "t": 20.3,
+   "what": "caller",
+   "text": "need prices too"
+  },
+  {
+   "t": 26.0,
+   "what": "assistant",
+   "text": "A haircut's thirty lari, a beard trim's twenty, and the combo is forty five. Which one sounds good?"
+  },
+  {
+   "t": 32.0,
+   "what": "caller",
+   "text": "Ah, probably is a combo. No, and I needed it in Monday."
+  },
+  {
+   "t": 37.3,
+   "what": "assistant",
+   "text": "One moment, let me check for Monday. Did you have a specific time in mind, or a barber you prefer?"
+  },
+  {
+   "t": 40.8,
+   "what": "caller",
+   "text": "Yeah, I want to 6:00 p.m."
+  },
+  {
+   "t": 40.8,
+   "what": "tool",
+   "name": "check_availability",
+   "result": "ok"
+  },
+  {
+   "t": 47.9,
+   "what": "assistant",
+   "text": "Hmm, six o'clock isn't free, but I have openings at five, six thirty, or seven. Do any of those work?"
+  },
+  {
+   "t": 52.0,
+   "what": "caller",
+   "text": "I can do 5."
+  },
+  {
+   "t": 52.0,
+   "what": "tool",
+   "name": "check_availability",
+   "result": "ok"
+  },
+  {
+   "t": 57.5,
+   "what": "assistant",
+   "text": "Five o'clock is available! Can I get your first name and phone number to book that?"
+  },
+  {
+   "t": 66.5,
+   "what": "caller",
+   "text": "Roman Cruise Lee and the number is •••."
+  },
+  {
+   "t": 74.2,
+   "what": "assistant",
+   "text": "Great, so that's for Roman, and the number is •••. Is that right?"
+  },
+  {
+   "t": 78.8,
+   "what": "caller",
+   "text": "188 at last"
+  },
+  {
+   "t": 85.2,
+   "what": "assistant",
+   "text": "Got it, so it's •••. Is that correct now?"
+  },
+  {
+   "t": 87.6,
+   "what": "caller",
+   "text": "Yeah, he's correct."
+  },
+  {
+   "t": 87.6,
+   "what": "tool",
+   "name": "book",
+   "result": "ok"
+  },
+  {
+   "t": 98.7,
+   "what": "interrupted"
+  },
+  {
+   "t": 104.8,
+   "what": "caller",
+   "text": "booked booked booked"
+  },
+  {
+   "t": 104.8,
+   "what": "tool",
+   "name": "confirm_booking",
+   "result": "error:The caller has not clearly said yes. Ask them again to confirm the details; do not book."
+  },
+  {
+   "t": 109.4,
+   "what": "interrupted"
+  },
+  {
+   "t": 111.6,
+   "what": "caller",
+   "text": "Yes, it's right. Book it."
+  },
+  {
+   "t": 111.6,
+   "what": "booked",
+   "id": "a2c13902",
+   "service": "Haircut and beard",
+   "barber": "giorgi",
+   "start": "Mon 26 Oct 17:00",
+   "name": "Roman"
+  },
+  {
+   "t": 111.6,
+   "what": "tool",
+   "name": "confirm_booking",
+   "result": "ok"
+  },
+  {
+   "t": 118.9,
+   "what": "assistant",
+   "text": "Done! You are booked: Haircut and beard, 26 October, at five in the afternoon. See you then!"
+  },
+  {
+   "t": 120.5,
+   "what": "caller",
+   "text": "Okay. Bye."
+  },
+  {
+   "t": 120.9,
+   "what": "tool",
+   "name": "end_call",
+   "result": "ok"
+  },
+  {
+   "t": 122.1,
+   "what": "assistant",
+   "text": "Bye! Thanks for calling."
+  },
+  {
+   "t": 122.1,
+   "what": "hangup"
+  }
+ ]
+}
