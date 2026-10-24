@@ -1,0 +1,84 @@
+{
+ "id": "77250f40",
+ "started_utc": "2026-10-24 11:55:29",
+ "seconds": 28.3,
+ "reason": "caller_left (browser closed or connection dropped)",
+ "model": "gemini-3.1-flash-live-preview",
+ "lang": "ka",
+ "tools": 2,
+ "tokens": 4435,
+ "mic": {
+  "frames": 693,
+  "peak": 0.97,
+  "loud_pct": 24
+ },
+ "trail": [
+  {
+   "t": 5.3,
+   "what": "assistant",
+   "text": "გამარჯობა, ნიმუშის ბარბერშოპია. რით შემიძლია დაგეხმაროთ?"
+  },
+  {
+   "t": 10.3,
+   "what": "caller",
+   "text": "ფრიშენჭამიდა ხვალე 2 საათზე"
+  },
+  {
+   "t": 12.0,
+   "what": "interrupted"
+  },
+  {
+   "t": 15.0,
+   "what": "caller",
+   "text": "დავამოწმებ."
+  },
+  {
+   "t": 15.0,
+   "what": "tool",
+   "name": "check_availability",
+   "result": "ok"
+  },
+  {
+   "t": 16.6,
+   "what": "interrupted"
+  },
+  {
+   "t": 18.6,
+   "what": "caller",
+   "text": "სამწუხაროდ ხვალ"
+  },
+  {
+   "t": 19.6,
+   "what": "interrupted"
+  },
+  {
+   "t": 21.8,
+   "what": "caller",
+   "text": "alkuiras"
+  },
+  {
+   "t": 22.7,
+   "what": "interrupted"
+  },
+  {
+   "t": 24.5,
+   "what": "caller",
+   "text": "Ja, Guido Swiss"
+  },
+  {
+   "t": 25.5,
+   "what": "interrupted"
+  },
+  {
+   "t": 27.3,
+   "what": "caller",
+   "text": "შაბათს რომ ვნახო."
+  },
+  {
+   "t": 27.3,
+   "what": "tool",
+   "name": "check_availability",
+   "result": "ok"
+  }
+ ]
+}
