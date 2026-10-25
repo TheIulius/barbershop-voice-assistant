@@ -1,0 +1,65 @@
+{
+ "id": "297a6af5",
+ "started_utc": "2026-10-25 06:32:40",
+ "seconds": 40.2,
+ "reason": "caller_pressed_hang_up",
+ "model": "gemini-3.1-flash-live-preview",
+ "lang": "ka",
+ "tools": 0,
+ "tokens": 4700,
+ "mic": {
+  "frames": 1001,
+  "peak": 0.75,
+  "loud_pct": 20
+ },
+ "trail": [
+  {
+   "t": 5.4,
+   "what": "assistant",
+   "text": "გამარჯობა, ნიმუშის ბარბერშოპია. რით შემიძლია დაგეხმაროთ?"
+  },
+  {
+   "t": 7.7,
+   "what": "caller",
+   "text": "გამარჯობა"
+  },
+  {
+   "t": 8.4,
+   "what": "interrupted"
+  },
+  {
+   "t": 12.0,
+   "what": "caller",
+   "text": "ჩაწერა ჩაწერა მინდა თმი შეჭრაზე"
+  },
+  {
+   "t": 18.4,
+   "what": "assistant",
+   "text": "კარგი, თმის შეჭრაზე ჩაწერა. რომელი ბარბერი გირჩევნიათ, გიორგი თუ ნიკა? თუ სულერთია?"
+  },
+  {
+   "t": 21.8,
+   "what": "caller",
+   "text": "გიორგი"
+  },
+  {
+   "t": 26.4,
+   "what": "assistant",
+   "text": "გასაგებია. როდის გინდათ მოსვლა? დღეს, ხვალ თუ სხვა დღეს?"
+  },
+  {
+   "t": 29.9,
+   "what": "caller",
+   "text": "Sam Shabat 106 Liberchovazir"
+  },
+  {
+   "t": 36.2,
+   "what": "interrupted"
+  },
+  {
+   "t": 39.7,
+   "what": "caller",
+   "text": "გახსნა არ გახსნა კაია. აუ გაიჩითა"
+  }
+ ]
+}
