@@ -1,0 +1,32 @@
+{
+ "id": "bb570a80",
+ "started_utc": "2026-10-25 07:37:43",
+ "seconds": 17.0,
+ "reason": "caller_pressed_hang_up",
+ "model": "gemini-3.1-flash-live-preview",
+ "lang": "ka",
+ "tools": 0,
+ "tokens": 3980,
+ "mic": {
+  "frames": 422,
+  "peak": 1.0,
+  "loud_pct": 23
+ },
+ "trail": [
+  {
+   "t": 5.1,
+   "what": "assistant",
+   "text": "გამარჯობა, ნიმუშის ბარბერშოპია. რით შემიძლია დაგეხმაროთ?"
+  },
+  {
+   "t": 10.4,
+   "what": "caller",
+   "text": "გამარჯობა. მინდა, რომ დავაზუსტო დღეს შეხვედრა."
+  },
+  {
+   "t": 15.5,
+   "what": "assistant",
+   "text": "გამარჯობა. დღეს, სამწუხაროდ, დაკეტილები ვართ. ხვალ რომ ჩაგწეროთ, გაწყობთ?"
+  }
+ ]
+}
