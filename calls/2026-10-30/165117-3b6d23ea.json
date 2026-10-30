@@ -1,0 +1,55 @@
+{
+ "id": "3b6d23ea",
+ "started_utc": "2026-10-30 16:51:17",
+ "seconds": 24.0,
+ "reason": "caller_pressed_hang_up",
+ "model": "gemini-3.1-flash-live-preview",
+ "lang": "ka",
+ "tools": 0,
+ "tokens": 4205,
+ "mic": {
+  "frames": 595,
+  "peak": 0.68,
+  "loud_pct": 41
+ },
+ "trail": [
+  {
+   "t": 5.2,
+   "what": "assistant",
+   "text": "გამარჯობა, ნიმუშის ბარბერშოპია. რით შემიძლია დაგეხმაროთ?"
+  },
+  {
+   "t": 7.3,
+   "what": "caller",
+   "text": "რა მომიწევს?"
+  },
+  {
+   "t": 12.2,
+   "what": "assistant",
+   "text": "რისი გაკეთება გსურთ? თმის შეჭრა, წვერის მოწესრიგება თუ ორივე?"
+  },
+  {
+   "t": 14.3,
+   "what": "caller",
+   "text": "Ist egal, geht eh."
+  },
+  {
+   "t": 16.1,
+   "what": "interrupted"
+  },
+  {
+   "t": 18.4,
+   "what": "caller",
+   "text": "any job that's micro government"
+  },
+  {
+   "t": 19.3,
+   "what": "interrupted"
+  },
+  {
+   "t": 21.3,
+   "what": "caller",
+   "text": "მსახიობი არაა? არა."
+  }
+ ]
+}
