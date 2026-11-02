@@ -23,6 +23,10 @@ services:
       - { key: ARCHIVE_BRANCH, value: call-logs }
       - { key: ARCHIVE_REPO, sync: false }          # "owner/name" of a PRIVATE logs-only repository (optional)
       - { key: ARCHIVE_GITHUB_TOKEN, sync: false }  # fine-grained token limited to that repo, Contents: read & write
+      - { key: PUBLIC_BASE_URL, value: "https://barbershop-voice-assistant.onrender.com" }   # must match the address typed into Twilio exactly
+      - { key: TELEPHONY_LANG, value: ka }
+      - { key: TWILIO_AUTH_TOKEN, sync: false }     # phone line stays OFF until this is set (Twilio console -> Account -> Auth Token)
+      - { key: TELEPHONY_ALLOWED_TO, sync: false }  # optional: your Twilio number(s) in +E.164, comma separated; other numbers are refused
       - { key: GEMINI_API_KEY, sync: false }
       - { key: APP_PASSWORD_HASH, sync: false }
       - { key: SESSION_SECRET, sync: false }

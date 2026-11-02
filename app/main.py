@@ -24,6 +24,7 @@ from .lab import router as lab_router
 from .recorder import router as recorder_router
 from .live import handle_call, CALL_LOG
 from . import archive
+from . import telephony
 from .auth import Auth, AuthMiddleware, make_router
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -63,6 +64,7 @@ app = FastAPI(title="Barbershop voice assistant (prototype)", docs_url=None, red
 app.include_router(make_router(auth, ROOT / "static" / "login.html"))
 app.include_router(lab_router)
 app.include_router(recorder_router)
+app.include_router(telephony.make_router(lambda: agent if (llm is not None and getattr(llm, "name", "") == "gemini") else None, handle_call))
 app.add_middleware(AuthMiddleware, auth=auth, public_mode=PUBLIC)
 
 @app.on_event("startup")

@@ -33,7 +33,8 @@ LOCK_SECONDS = 15 * 60
 MAX_FAILS_GLOBAL = 40
 GLOBAL_LOCK_SECONDS = 5 * 60
 
-PUBLIC_PATHS = {"/login", "/healthz"}
+PUBLIC_PATHS = {"/login", "/healthz", "/telephony/voice"}   # /telephony/voice checks Twilio's signature itself
+PUBLIC_WS_PATHS = {"/telephony/stream"}                    # the phone provider has no cookie; the route checks a signed one-time token
 # In public mode these developer/test routes do not exist at all (they would only burn your tokens).
 PUBLIC_BLOCKED = ("/classic", "/lab", "/api/lab", "/api/start", "/api/chat", "/api/stt", "/api/tts")
 
@@ -168,7 +169,7 @@ class AuthMiddleware:
         headers = self._headers(scope)
 
         if scope["type"] == "websocket":
-            ok = (self.auth is None or self.auth.cookie_ok(headers.get("cookie", ""))) and self._same_origin(headers)
+            ok = (self.auth is None or path in PUBLIC_WS_PATHS or self.auth.cookie_ok(headers.get("cookie", ""))) and self._same_origin(headers)
             if self.public and path.startswith(PUBLIC_BLOCKED):
                 ok = False
             if not ok:

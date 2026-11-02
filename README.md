@@ -76,6 +76,12 @@ Known weak spots: Georgian phone digits are sometimes misheard (the assistant re
 the on-screen caller transcript is sometimes wrong in Georgian even when the AI understood, and the live voice
 needs the Google key's quota (free tier can run out).
 
+## Phone line (real phone calls)
+`app/telephony.py` connects a Twilio phone number to the same live assistant: Twilio calls `POST /telephony/voice` (signature-checked),
+we answer with XML that opens an audio WebSocket `/telephony/stream` (single-use signed token), and 8 kHz mu-law audio is converted
+to/from the engine's PCM (`app/g711.py`). Off until `TWILIO_AUTH_TOKEN` is set. Step-by-step setup in Georgian: `docs/PHONE_SETUP_KA.md`.
+Local test without Twilio: `scripts/phone_sim.py` (pretends to be Twilio).
+
 ## 1. Run it (5 minutes)
 
 ```bash

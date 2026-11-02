@@ -242,6 +242,8 @@ class LiveCall:
         self.lang_corrections = 0
         self.call_id = secrets.token_hex(4)
         self.headphones = False
+        self.channel = "web"               # "phone" when the audio comes from a real phone line (app/telephony.py)
+        self.caller_number = ""            # 9-digit Georgian number from caller ID (phone calls only)
         self.started_at = time.time()
         self.trail = []                    # [(seconds_into_call, what, details)]
         self.end_reason = ""
@@ -277,13 +279,24 @@ class LiveCall:
         except Exception:
             pass
 
+    def _phone_hint(self) -> str:
+        if self.channel != "phone":
+            return ""
+        hint = "\n- This is a real phone call: the caller can only hear you, so keep your sentences short."
+        n = self.caller_number
+        if n.isdigit() and len(n) == 9:
+            hint += (f"\n- Caller ID shows the number {n}. When you need their phone number for a booking you may ask whether to use the number "
+                     "they are calling from; if they say yes, use it, but still read it back in groups of three and get their confirmation. "
+                     "Caller ID is only a suggestion, never proof of who they are.")
+        return hint
+
     def _setup(self, model: str, with_vad: bool = True) -> dict:
         cfg = {
             "model": "models/" + model,
             "generationConfig": {"responseModalities": ["AUDIO"], "temperature": 0.3,
                                  "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": VOICE}},
                                                   **({"languageCode": LANG_CODE[self.lang0]} if LOCK_LANGUAGE else {})}},
-            "systemInstruction": {"parts": [{"text": build_prompt(self.agent, self.lang0)}]},
+            "systemInstruction": {"parts": [{"text": build_prompt(self.agent, self.lang0) + self._phone_hint()}]},
             "tools": TOOLS,
             "inputAudioTranscription": {},
             "outputAudioTranscription": {},
@@ -663,7 +676,7 @@ class LiveCall:
     def _record_call(self) -> None:
         summary = {
             "id": self.call_id, "started_utc": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(self.started_at)),
-            "seconds": round(time.time() - self.started_at, 1), "reason": self.end_reason or "unknown",
+            "channel": self.channel, "seconds": round(time.time() - self.started_at, 1), "reason": self.end_reason or "unknown",
             "model": getattr(self, "model", "?"), "lang": self.lang0, "tools": self.tool_calls, "tokens": self.tokens,
             "mic": {"frames": self.mic_frames, "peak": round(self.mic_peak / 32768, 2),
                     "loud_pct": round(100 * self.mic_loud / max(1, self.mic_frames))},
@@ -754,6 +767,8 @@ async def handle_call(ws: WebSocket, agent: Agent, debug: bool, ip: Optional[str
         call = LiveCall(ws, agent, lang, debug)
         call.save_audio = save_audio
         call.headphones = ws.query_params.get("hp") == "1"
+        if getattr(ws, "is_phone", False):
+            call.channel, call.caller_number = "phone", getattr(ws, "caller_number", "")
         await call.run()
     finally:
         _active_by_ip[ip] -= 1
