@@ -1,0 +1,23 @@
+{
+ "id": "0566d117",
+ "started_utc": "2026-11-14 18:24:56",
+ "channel": "web",
+ "seconds": 7.2,
+ "reason": "caller_pressed_hang_up",
+ "model": "gemini-3.1-flash-live-preview",
+ "lang": "ka",
+ "tools": 0,
+ "tokens": 3664,
+ "mic": {
+  "frames": 178,
+  "peak": 0.04,
+  "loud_pct": 0
+ },
+ "trail": [
+  {
+   "t": 5.3,
+   "what": "assistant",
+   "text": "გამარჯობა, ნიმუშის ბარბერშოპია. რით შემიძლია დაგეხმაროთ?"
+  }
+ ]
+}
