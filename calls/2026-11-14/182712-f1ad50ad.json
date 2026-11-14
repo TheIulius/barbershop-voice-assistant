@@ -1,0 +1,23 @@
+{
+ "id": "f1ad50ad",
+ "started_utc": "2026-11-14 18:27:12",
+ "channel": "web",
+ "seconds": 10.7,
+ "reason": "caller_pressed_hang_up",
+ "model": "gemini-3.1-flash-live-preview",
+ "lang": "en",
+ "tools": 0,
+ "tokens": 3654,
+ "mic": {
+  "frames": 263,
+  "peak": 0.02,
+  "loud_pct": 0
+ },
+ "trail": [
+  {
+   "t": 4.8,
+   "what": "assistant",
+   "text": "Hey there! Welcome to Sample Barbershop. How can I help you today?"
+  }
+ ]
+}
